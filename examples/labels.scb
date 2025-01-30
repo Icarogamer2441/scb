@@ -1,0 +1,16 @@
+datadef fmt: bytes = "%ld\n";
+
+extern %printf;
+
+funcdef %main() -> int {
+    $i: int = 0;
+    jmp .loop;
+
+.loop:
+    call %printf(fmt: bytes, $i: int);
+    $i: int = add $i, 1;
+    cmp $i, 9;
+    jle .loop;
+
+    ret int 0;
+}

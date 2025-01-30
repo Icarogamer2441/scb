@@ -1,4 +1,4 @@
-from parser_lexer import DataDefNode, ExternNode, FuncDefNode, CallNode, RetNode, VarDeclNode, BinOpNode, FuncCallAssignNode, StrDeclNode
+from parser_lexer import DataDefNode, ExternNode, FuncDefNode, CallNode, RetNode, VarDeclNode, BinOpNode, FuncCallAssignNode, StrDeclNode, LabelNode, CmpNode, JumpNode
 
 class CodeGenerator:
     def __init__(self):
@@ -10,7 +10,9 @@ class CodeGenerator:
     
     def generate(self, ast):
         for node in ast:
-            if isinstance(node, DataDefNode):
+            if isinstance(node, LabelNode):
+                self.text_section.append(f'.{node.name}:')
+            elif isinstance(node, DataDefNode):
                 self._gen_data_def(node)
             elif isinstance(node, ExternNode):
                 self._gen_extern(node)
@@ -28,6 +30,10 @@ class CodeGenerator:
                 self._gen_func_call_assign(node)
             elif isinstance(node, StrDeclNode):
                 self._gen_str_decl(node)
+            elif isinstance(node, CmpNode):
+                self._gen_cmp(node)
+            elif isinstance(node, JumpNode):
+                self._gen_jump(node)
         return self._finalize_asm()
     
     def _gen_data_def(self, node):
@@ -50,15 +56,15 @@ class CodeGenerator:
             f'{node.name}:',
             '    push rbp',
             '    mov rbp, rsp',
-            '    sub rsp, 48',  # Stack space allocation
-            '    and rsp, -16'   # Align stack to 16-byte boundary
+            '    sub rsp, 64',  # Increased stack space
+            '    and rsp, -16'
         ])
-        
-        # Store parameters
-        regs = ['rdi', 'rsi', 'rdx', 'rcx', 'r8', 'r9']
+        # Reset stack offset for local variables
         self.stack_offset = 0
         self.vars = {}
         
+        # Store parameters
+        regs = ['rdi', 'rsi', 'rdx', 'rcx', 'r8', 'r9']
         for i, param in enumerate(node.params):
             offset = self.stack_offset + 16
             self.vars[param] = offset
@@ -67,40 +73,53 @@ class CodeGenerator:
     
     def _gen_var_decl(self, node):
         if isinstance(node.value, int):
-            # Atribuição direta: $x: int = 5;
-            offset = self.stack_offset + 16  # Reserva espaço abaixo do RBP
+            offset = self.stack_offset + 16
             self.vars[node.name] = offset
             self.text_section.extend([
-                f'    mov DWORD PTR [rbp - {offset}], {node.value}'
+                f'    mov QWORD PTR [rbp - {offset}], {node.value}'
             ])
-            self.stack_offset += 4
+            self.stack_offset += 8
     
     def _gen_bin_op(self, node):
-        # Operação add: $z = add $x, $y
-        offset_z = self.stack_offset + 16
-        self.vars[node.result_var] = offset_z
-        offset_x = self.vars[node.left_var]
-        offset_y = self.vars[node.right_var]
+        # Allocate stack space for the result variable if it doesn't exist
+        if node.result_var not in self.vars:
+            offset = self.stack_offset + 16
+            self.vars[node.result_var] = offset
+            self.stack_offset += 8  # Allocate 8 bytes for 64-bit int
         
+        target_offset = self.vars[node.result_var]
+        
+        def get_operand(operand):
+            if operand.startswith('$'):
+                return f'QWORD PTR [rbp - {self.vars[operand[1:]]}]'
+            return operand
+
+        left = get_operand(node.left_var)
+        right = get_operand(node.right_var)
+
         self.text_section.extend([
-            f'    mov eax, DWORD PTR [rbp - {offset_x}]',
-            f'    add eax, DWORD PTR [rbp - {offset_y}]',
-            f'    mov DWORD PTR [rbp - {offset_z}], eax'
+            f'    mov rax, {left}',
+            f'    add rax, {right}',
+            f'    mov QWORD PTR [rbp - {target_offset}], rax'
         ])
-        self.stack_offset += 4
     
     def _gen_call(self, node):
         regs = ['rdi', 'rsi', 'rdx', 'rcx', 'r8', 'r9']
         for i, arg in enumerate(node.args):
+            if i >= len(regs):
+                break
+                
             if arg.startswith('$'):
                 offset = self.vars[arg[1:]]
-                # Usa 32 bits para inteiros, 64 bits para ponteiros
-                if isinstance(node.args[i], int) or node.args[i].isdigit():
-                    self.text_section.append(f'    mov {regs[i][:3]}, DWORD PTR [rbp - {offset}]')
+                # Handle string pointers
+                if isinstance(arg, str) and arg.endswith(': bytes'):
+                    self.text_section.append(f'    lea {regs[i]}, [rbp - {offset}]')
                 else:
                     self.text_section.append(f'    mov {regs[i]}, QWORD PTR [rbp - {offset}]')
             else:
                 self.text_section.append(f'    lea {regs[i]}, [{arg} + rip]')
+        
+        self.text_section.append('    xor rax, rax')
         self.text_section.append(f'    call {node.func}')
     
     def _gen_ret(self, node):
@@ -135,7 +154,7 @@ class CodeGenerator:
         self.stack_offset += 4
     
     def _gen_str_decl(self, node):
-        # Cria rótulo único para a string
+        # Create unique label for the string
         label = f'..LC{len(self.data_section)//4}'
         self.data_section.extend([
             f'.section .rodata',
@@ -143,7 +162,7 @@ class CodeGenerator:
             f'    .string "{node.value}"'
         ])
         
-        # Armazena endereço da string na stack
+        # Store string address in stack
         offset = self.stack_offset + 16
         self.vars[node.name] = offset
         self.text_section.extend([
@@ -151,6 +170,19 @@ class CodeGenerator:
             f'    mov QWORD PTR [rbp - {offset}], rax'
         ])
         self.stack_offset += 8
+    
+    def _gen_cmp(self, node):
+        def get_operand(operand):
+            if operand.startswith('$'):
+                return f'QWORD PTR [rbp - {self.vars[operand[1:]]}]'
+            return operand
+        
+        left = get_operand(node.left)
+        right = get_operand(node.right)
+        self.text_section.append(f'    cmp {left}, {right}')
+
+    def _gen_jump(self, node):
+        self.text_section.append(f'    {node.condition} .{node.label}')
     
     def _finalize_asm(self):
         assembly = ['.intel_syntax noprefix']

@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz
+
+build/
+dist/
+*.egg-info/
+*.egg
+*.whl
+*.dist-info
+
+examples/*.s

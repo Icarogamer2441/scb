@@ -21,8 +21,11 @@ class Lexer:
             if not line or line.startswith('//'):
                 continue
                 
+            # Add label matching
+            if line.startswith('.'):
+                tokens.append(self._match_label(line))
             # Match tokens
-            if line.startswith('datadef'):
+            elif line.startswith('datadef'):
                 tokens.append(self._match_datadef(line))
             elif line.startswith('extern'):
                 tokens.append(self._match_extern(line))
@@ -36,6 +39,10 @@ class Lexer:
                 tokens.append(self._match_var_decl(line))
             elif 'add' in line:
                 tokens.append(self._match_binop(line))
+            elif line.startswith('cmp'):
+                tokens.append(self._match_cmp(line))
+            elif line.startswith('j'):
+                tokens.append(self._match_jump(line))
         return tokens
     
     def _match_datadef(self, line):
@@ -75,14 +82,14 @@ class Lexer:
 
     def _match_var_decl(self, line):
         match = re.match(
-            r'\$(\w+):\s*(\w+)\s*=\s*(?:"(.*)"|(\d+)|add\s+\$(\w+),\s*\$(\w+)|call\s+%(\w+)\((.*)\));', 
+            r'\$(\w+):\s*(\w+)\s*=\s*(?:"(.*)"|(\d+)|add\s+(\$?\w+),\s*(\$?\w+)|call\s+%(\w+)\((.*)\));', 
             line
         )
         if match:
             var_type = match.group(2)
             if var_type == 'int':
-                if match.group(3):  # string (inválido para int)
-                    raise SyntaxError(f"Tipo inválido para string: {line}")
+                if match.group(3):  # string (invalid for int)
+                    raise SyntaxError(f"Invalid type for string: {line}")
                 elif match.group(4):  # int literal
                     return Token('VAR_DECL', (match.group(1), int(match.group(4))))
                 elif match.group(5) and match.group(6):  # add
@@ -95,6 +102,24 @@ class Lexer:
             elif var_type == 'bytes':
                 return Token('STR_DECL', (match.group(1), match.group(3)))
         raise SyntaxError(f"Declaração inválida: {line}")
+
+    def _match_label(self, line):
+        match = re.match(r'^\.(\w+):$', line)
+        if match:
+            return Token('LABEL', match.group(1))
+        raise SyntaxError(f"Invalid label: {line}")
+
+    def _match_cmp(self, line):
+        match = re.match(r'cmp\s+(\$?\w+),\s*(\$?\w+);', line)
+        if match:
+            return Token('CMP', (match.group(1), match.group(2)))
+        raise SyntaxError(f"Invalid cmp: {line}")
+
+    def _match_jump(self, line):
+        match = re.match(r'(j\w+)\s+\.(\w+);', line)
+        if match:
+            return Token('JUMP', (match.group(1), match.group(2)))
+        raise SyntaxError(f"Invalid jump: {line}")
 
 class ASTNode:
     pass
@@ -145,6 +170,20 @@ class FuncCallAssignNode(ASTNode):
         self.func_name = func_name
         self.args = args
 
+class LabelNode(ASTNode):
+    def __init__(self, name):
+        self.name = name
+
+class CmpNode(ASTNode):
+    def __init__(self, left, right):
+        self.left = left
+        self.right = right
+
+class JumpNode(ASTNode):
+    def __init__(self, condition, label):
+        self.condition = condition
+        self.label = label
+
 class Parser:
     def __init__(self, tokens):
         self.tokens = tokens
@@ -154,7 +193,10 @@ class Parser:
         ast = []
         while self.pos < len(self.tokens):
             token = self.tokens[self.pos]
-            if token.type == 'DATA_DEF':
+            # Add label handling
+            if token.type == 'LABEL':
+                ast.append(LabelNode(token.value))
+            elif token.type == 'DATA_DEF':
                 ast.append(DataDefNode(*token.value))
             elif token.type == 'EXTERN':
                 ast.append(ExternNode(token.value))
@@ -172,5 +214,9 @@ class Parser:
                 ast.append(FuncCallAssignNode(*token.value))
             elif token.type == 'STR_DECL':
                 ast.append(StrDeclNode(*token.value))
+            elif token.type == 'CMP':
+                ast.append(CmpNode(*token.value))
+            elif token.type == 'JUMP':
+                ast.append(JumpNode(*token.value))
             self.pos += 1
         return ast

@@ -58,3 +58,12 @@ $result: int = call %sum($a: int, $b: int);
 ret int 0;
 ```
 
+### Labels and Control Flow
+
+```scb
+.loop:
+    # ... code ...
+    jmp .loop  # Unconditional jump
+    cmp je $a, $b, .target  # Conditional jump (jump if equal)
+```
+
