@@ -1,0 +1,8 @@
+datadef hello: bytes = "hello, world!\n";
+
+extern %printf;
+
+funcdef %main() -> int {
+    call %printf(hello: bytes);
+    ret int 0;
+}

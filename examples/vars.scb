@@ -1,0 +1,11 @@
+datadef fmt: bytes = "%d + %d = %d\n";
+
+extern %printf;
+
+funcdef %main() -> int {
+    $x: int = 1;
+    $y: int = 2;
+    $z: int = add $x, $y;
+    call %printf(fmt: bytes, $x: int, $y: int, $z: int);
+    ret int 0;
+}
