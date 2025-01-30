@@ -1,6 +1,6 @@
 # SCB Compiler
 
-SCB (Simple C-like Bytecode) is a minimalistic compiler that translates a C-like language into x86-64 assembly. The compiler is implemented in Python and generates assembly code that can be assembled and linked using GCC.
+SCB (Simple Compiler Backend) is a minimalistic compiler that translates a IR language into x86-64 assembly. The compiler is implemented in Python and generates assembly code that can be assembled and linked using GCC.
 
 ## Features
 
