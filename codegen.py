@@ -81,12 +81,6 @@ class CodeGenerator:
             self.stack_offset += 8
     
     def _gen_bin_op(self, node):
-        # Allocate stack space for the result variable if it doesn't exist
-        if node.result_var not in self.vars:
-            offset = self.stack_offset + 16
-            self.vars[node.result_var] = offset
-            self.stack_offset += 8  # Allocate 8 bytes for 64-bit int
-        
         target_offset = self.vars[node.result_var]
         
         def get_operand(operand):
@@ -97,11 +91,30 @@ class CodeGenerator:
         left = get_operand(node.left_var)
         right = get_operand(node.right_var)
 
-        self.text_section.extend([
-            f'    mov rax, {left}',
-            f'    add rax, {right}',
-            f'    mov QWORD PTR [rbp - {target_offset}], rax'
-        ])
+        if node.op == 'add':
+            asm = [
+                f'    mov rax, {left}',
+                f'    add rax, {right}'
+            ]
+        elif node.op == 'sub':
+            asm = [
+                f'    mov rax, {left}',
+                f'    sub rax, {right}'
+            ]
+        elif node.op == 'mul':
+            asm = [
+                f'    mov rax, {left}',
+                f'    imul rax, {right}'
+            ]
+        elif node.op == 'div':
+            asm = [
+                f'    mov rax, {left}',
+                f'    cqo',
+                f'    idiv {right}'
+            ]
+        
+        asm.append(f'    mov QWORD PTR [rbp - {target_offset}], rax')
+        self.text_section.extend(asm)
     
     def _gen_call(self, node):
         regs = ['rdi', 'rsi', 'rdx', 'rcx', 'r8', 'r9']

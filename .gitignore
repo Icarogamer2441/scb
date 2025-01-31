@@ -13,3 +13,4 @@ dist/
 *.dist-info
 
 examples/*.s
+tests/

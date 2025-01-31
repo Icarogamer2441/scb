@@ -82,21 +82,21 @@ class Lexer:
 
     def _match_var_decl(self, line):
         match = re.match(
-            r'\$(\w+):\s*(\w+)\s*=\s*(?:"(.*)"|(\d+)|add\s+(\$?\w+),\s*(\$?\w+)|call\s+%(\w+)\((.*)\));', 
+            r'\$(\w+):\s*(\w+)\s*=\s*(?:"(.*)"|(\d+)|(add|sub|mul|div)\s+(\$?\w+),\s*(\$?\w+)|call\s+%(\w+)\((.*)\));', 
             line
         )
         if match:
             var_type = match.group(2)
             if var_type == 'int':
-                if match.group(3):  # string (invalid for int)
+                if match.group(5) in ['add', 'sub', 'mul', 'div']:
+                    return Token('BIN_OP', (match.group(5), match.group(1), match.group(6), match.group(7)))
+                elif match.group(3):  # string (invalid for int)
                     raise SyntaxError(f"Invalid type for string: {line}")
                 elif match.group(4):  # int literal
                     return Token('VAR_DECL', (match.group(1), int(match.group(4))))
-                elif match.group(5) and match.group(6):  # add
-                    return Token('BIN_OP', (match.group(1), match.group(5), match.group(6)))
-                elif match.group(7) and match.group(8):  # call
-                    args = [a.split(':')[0].strip() for a in match.group(8).split(',')]
-                    return Token('FUNC_CALL_ASSIGN', (match.group(1), match.group(7), args))
+                elif match.group(8) and match.group(9):  # call
+                    args = [a.split(':')[0].strip() for a in match.group(9).split(',')]
+                    return Token('FUNC_CALL_ASSIGN', (match.group(1), match.group(8), args))
                 else:
                     raise SyntaxError(f"Declaração inválida: {line}")
             elif var_type == 'bytes':
@@ -116,7 +116,8 @@ class Lexer:
         raise SyntaxError(f"Invalid cmp: {line}")
 
     def _match_jump(self, line):
-        match = re.match(r'(j\w+)\s+\.(\w+);', line)
+        valid_jumps = ['jge', 'je', 'jg', 'jl', 'jne', 'jle', 'jmp']
+        match = re.match(r'(' + '|'.join(valid_jumps) + r')\s+\.(\w+);', line)
         if match:
             return Token('JUMP', (match.group(1), match.group(2)))
         raise SyntaxError(f"Invalid jump: {line}")
@@ -159,7 +160,8 @@ class VarDeclNode(ASTNode):
         self.value = value
 
 class BinOpNode(ASTNode):
-    def __init__(self, result_var, left_var, right_var):
+    def __init__(self, op, result_var, left_var, right_var):
+        self.op = op
         self.result_var = result_var
         self.left_var = left_var
         self.right_var = right_var
@@ -209,7 +211,8 @@ class Parser:
             elif token.type == 'VAR_DECL':
                 ast.append(VarDeclNode(*token.value))
             elif token.type == 'BIN_OP':
-                ast.append(BinOpNode(*token.value))
+                op, result_var, left, right = token.value
+                ast.append(BinOpNode(op, result_var, left, right))
             elif token.type == 'FUNC_CALL_ASSIGN':
                 ast.append(FuncCallAssignNode(*token.value))
             elif token.type == 'STR_DECL':

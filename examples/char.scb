@@ -1,0 +1,9 @@
+datadef fmt: bytes = "%c\n";
+
+extern %printf;
+
+funcdef %main() -> int {
+    $c: int = 65;
+    call %printf(fmt: bytes, $c: int);
+    ret int 0;
+}
