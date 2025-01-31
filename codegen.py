@@ -1,4 +1,4 @@
-from parser_lexer import DataDefNode, ExternNode, FuncDefNode, CallNode, RetNode, VarDeclNode, BinOpNode, FuncCallAssignNode, StrDeclNode, LabelNode, CmpNode, JumpNode, StructDefNode
+from parser_lexer import DataDefNode, ExternNode, FuncDefNode, CallNode, RetNode, VarDeclNode, BinOpNode, FuncCallAssignNode, StrDeclNode, LabelNode, CmpNode, JumpNode, StructDefNode, EnumDefNode
 
 class CodeGenerator:
     def __init__(self):
@@ -8,6 +8,7 @@ class CodeGenerator:
         self.stack_offset = 0
         self.vars = {}  # Now stores (offset, type) tuples
         self.structs = {}
+        self.enums = {}
     
     def generate(self, ast):
         for node in ast:
@@ -37,6 +38,8 @@ class CodeGenerator:
                 self._gen_cmp(node)
             elif isinstance(node, JumpNode):
                 self._gen_jump(node)
+            elif isinstance(node, EnumDefNode):
+                self.enums[node.name] = {variant: i for i, variant in enumerate(node.variants)}
         return self._finalize_asm()
     
     def _gen_data_def(self, node):
@@ -74,6 +77,17 @@ class CodeGenerator:
             self.stack_offset += 8
     
     def _gen_var_decl(self, node):
+        # Handle enum values
+        if node.type in self.enums:
+            enum_values = self.enums[node.type]
+            if isinstance(node.value, str) and '::' in node.value:
+                _, variant = node.value.split('::')
+                int_value = enum_values[variant]
+                offset = self.stack_offset + 16
+                self.vars[node.name] = (offset, node.type)
+                self.text_section.append(f'    mov QWORD PTR [rbp - {offset}], {int_value}')
+                self.stack_offset += 8
+                return
         if node.type in self.structs:
             struct_fields = self.structs[node.type]
             struct_size = len(struct_fields) * 8
@@ -158,6 +172,8 @@ class CodeGenerator:
                 total_offset = current_offset
                 
                 for field in fields:
+                    if current_type not in self.structs:
+                        break  # Stop if not a struct type
                     struct_fields = self.structs[current_type]
                     field_index = next(i for i, (name, _) in enumerate(struct_fields) 
                                     if name == field)
@@ -280,4 +296,5 @@ class CodeGenerator:
         assembly.append('')
         assembly.append('.text')
         assembly.extend(self.text_section)
+        assembly.append('')  # Add final newline
         return '\n'.join(assembly)

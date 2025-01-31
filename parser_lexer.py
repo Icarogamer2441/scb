@@ -18,6 +18,8 @@ class Lexer:
         tokens = []
         in_struct = False
         struct_lines = []
+        in_enum = False
+        enum_lines = []
         for line in self.source:
             line = line.strip()
             if not line or line.startswith('//'):
@@ -34,6 +36,19 @@ class Lexer:
                     full_struct = ' '.join(struct_lines)
                     tokens.append(self._match_structdef(full_struct))
                     in_struct = False
+                continue
+                
+            if line.startswith('enumdef'):
+                in_enum = True
+                enum_lines = [line]
+                continue
+                
+            if in_enum:
+                enum_lines.append(line)
+                if '}' in line:
+                    full_enum = ' '.join(enum_lines)
+                    tokens.append(self._match_enumdef(full_enum))
+                    in_enum = False
                 continue
                 
             # Add label matching
@@ -96,12 +111,14 @@ class Lexer:
         raise SyntaxError(f"Invalid return: {line}")
 
     def _match_var_decl(self, line):
-        # Update regex to capture variables in struct init
+        # Update regex to capture enum values
         struct_init = r'(\w+)\s*{([^}]*)}'
+        enum_value = r'(\w+)::(\w+)'
         pattern = (
             r'\$(\w+):\s*(\w+)\s*=\s*'
             r'(?:call\s+%(\w+)\((.*)\)|'
             f'{struct_init}|'
+            f'{enum_value}|'  # Add enum value matching
             r'"([^"]*)"|'
             r'(\d+)|'
             r'([a-z]+)\s+(\$?\w+),\s*(\$?\w+)'
@@ -117,13 +134,11 @@ class Lexer:
         if match.group(5):  # Struct initialization
             fields = re.findall(r'\$(\w+):\s*(\$?\w+)', match.group(6))
             return Token('VAR_DECL', (var_name, var_type, fields))
+        elif match.group(7):  # Enum value
+            return Token('ENUM_VALUE', (var_name, var_type, f"{match.group(7)}::{match.group(8)}"))
         elif match.group(3):  # Function call
             args = [a.split(':')[0].strip() for a in match.group(4).split(',')]
             return Token('FUNC_CALL_ASSIGN', (var_name, match.group(3), args))
-        elif match.group(7):  # String
-            return Token('STR_DECL', (var_name, match.group(7)))
-        elif match.group(8):  # Integer
-            return Token('VAR_DECL', (var_name, var_type, int(match.group(8))))
         elif match.group(9):  # BinOp
             return Token('BIN_OP', (match.group(9), var_name, match.group(10), match.group(11)))
         
@@ -170,6 +185,19 @@ class Lexer:
                 fields.append((name_type.group(1), name_type.group(2)))
             
         return Token('STRUCT_DEF', (struct_name, fields))
+
+    def _match_enumdef(self, line):
+        match = re.match(
+            r'enumdef\s+(\w+)\s*{\s*((?:[\s\w,]+\s*)*)\s*}', 
+            line, 
+            re.DOTALL
+        )
+        if not match:
+            raise SyntaxError(f"Invalid enumdef: {line}")
+        
+        enum_name = match.group(1)
+        variants = [v.strip() for v in match.group(2).split(',') if v.strip()]
+        return Token('ENUM_DEF', (enum_name, variants))
 
 class ASTNode:
     pass
@@ -241,6 +269,11 @@ class StructDefNode(ASTNode):
         self.name = name
         self.fields = fields
 
+class EnumDefNode(ASTNode):
+    def __init__(self, name, variants):
+        self.name = name
+        self.variants = variants
+
 class Parser:
     def __init__(self, tokens):
         self.tokens = tokens
@@ -285,5 +318,11 @@ class Parser:
             elif token.type == 'STRUCT_DEF':
                 name, fields = token.value
                 ast.append(StructDefNode(name, fields))
+            elif token.type == 'ENUM_DEF':
+                name, variants = token.value
+                ast.append(EnumDefNode(name, variants))
+            elif token.type == 'ENUM_VALUE':
+                name, var_type, value = token.value
+                ast.append(VarDeclNode(name, var_type, value))
             self.pos += 1
         return ast

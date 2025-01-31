@@ -1,4 +1,4 @@
-all: ./examples/vars ./examples/hello ./examples/funcs ./examples/labels ./examples/char ./examples/structs ./examples/structs2
+all: ./examples/vars ./examples/hello ./examples/funcs ./examples/labels ./examples/char ./examples/structs ./examples/structs2 ./examples/enums
 
 ./examples/%: ./examples/%.scb
 	python3 scbc.py -c $<
@@ -12,7 +12,8 @@ clean:
 	      ./examples/labels \
 	      ./examples/char \
 	      ./examples/structs \
-	      ./examples/structs2
+	      ./examples/structs2 \
+	      ./examples/enums
 
 runall:
 	echo "Running vars\n"
@@ -29,3 +30,5 @@ runall:
 	./examples/structs
 	echo "Running structs2\n"
 	./examples/structs2
+	echo "Running enums\n"
+	./examples/enums

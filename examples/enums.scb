@@ -1,0 +1,28 @@
+datadef fmt: bytes = "color = %d, color2 = %d\n";
+
+enumdef Color {
+    RED,
+    GREEN,
+    BLUE,
+}
+
+structdef Object {
+    $color: Color;
+}
+
+funcdef %main() -> int {
+    $color: Color = Color::GREEN;
+    $color2: Color = call %get_color($color: Color);
+    $obj: Object = call %get_object($color: Color);
+    call %printf(fmt: bytes, $obj->$color: Color, $color2: Color);
+    ret int 0;
+}
+
+funcdef %get_color(c: Color) -> Color {
+    ret Color $c;
+}
+
+funcdef %get_object(c: Color) -> Object {
+    $obj: Object = Object { $color: $c };
+    ret Object $obj;
+}
