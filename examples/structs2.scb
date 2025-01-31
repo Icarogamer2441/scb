@@ -1,0 +1,20 @@
+datadef fmt: bytes = "Center: %d, %d, Radius: %d\n";
+
+extern %printf;
+
+structdef Point {
+    $x: int;
+    $y: int;
+}
+
+structdef Circle {
+    $center: Point;
+    $radius: int;
+}
+
+funcdef %main() -> int {
+    $p: Point = Point { $x: 1, $y: 2 };
+    $c: Circle = Circle { $center: $p, $radius: 3 };
+    call %printf(fmt: bytes, $c->$center->$x: int, $c->$center->$y: int, $c->$radius: int);
+    ret int 0;
+}

@@ -1,0 +1,14 @@
+datadef fmt: bytes = "%d, %d\n";
+
+extern %printf;
+
+structdef Point {
+    $x: int;
+    $y: int;
+}
+
+funcdef %main() -> int {
+    $p: Point = Point { $x: 1, $y: 2 };
+    call %printf(fmt: bytes, $p->$x: int, $p->$y: int);
+    ret int 0;
+}

@@ -16,9 +16,24 @@ class Lexer:
     
     def tokenize(self):
         tokens = []
+        in_struct = False
+        struct_lines = []
         for line in self.source:
             line = line.strip()
             if not line or line.startswith('//'):
+                continue
+                
+            if line.startswith('structdef'):
+                in_struct = True
+                struct_lines = [line]
+                continue
+                
+            if in_struct:
+                struct_lines.append(line)
+                if '}' in line:
+                    full_struct = ' '.join(struct_lines)
+                    tokens.append(self._match_structdef(full_struct))
+                    in_struct = False
                 continue
                 
             # Add label matching
@@ -81,27 +96,38 @@ class Lexer:
         raise SyntaxError(f"Invalid return: {line}")
 
     def _match_var_decl(self, line):
-        match = re.match(
-            r'\$(\w+):\s*(\w+)\s*=\s*(?:"(.*)"|(\d+)|(add|sub|mul|div)\s+(\$?\w+),\s*(\$?\w+)|call\s+%(\w+)\((.*)\));', 
-            line
+        # Update regex to capture variables in struct init
+        struct_init = r'(\w+)\s*{([^}]*)}'
+        pattern = (
+            r'\$(\w+):\s*(\w+)\s*=\s*'
+            r'(?:call\s+%(\w+)\((.*)\)|'
+            f'{struct_init}|'
+            r'"([^"]*)"|'
+            r'(\d+)|'
+            r'([a-z]+)\s+(\$?\w+),\s*(\$?\w+)'
+            r')'
         )
-        if match:
-            var_type = match.group(2)
-            if var_type == 'int':
-                if match.group(5) in ['add', 'sub', 'mul', 'div']:
-                    return Token('BIN_OP', (match.group(5), match.group(1), match.group(6), match.group(7)))
-                elif match.group(3):  # string (invalid for int)
-                    raise SyntaxError(f"Invalid type for string: {line}")
-                elif match.group(4):  # int literal
-                    return Token('VAR_DECL', (match.group(1), int(match.group(4))))
-                elif match.group(8) and match.group(9):  # call
-                    args = [a.split(':')[0].strip() for a in match.group(9).split(',')]
-                    return Token('FUNC_CALL_ASSIGN', (match.group(1), match.group(8), args))
-                else:
-                    raise SyntaxError(f"Declaração inválida: {line}")
-            elif var_type == 'bytes':
-                return Token('STR_DECL', (match.group(1), match.group(3)))
-        raise SyntaxError(f"Declaração inválida: {line}")
+        match = re.match(pattern, line)
+        
+        if not match:
+            raise SyntaxError(f"Invalid declaration: {line}")
+        
+        var_name, var_type = match.group(1), match.group(2)
+        
+        if match.group(5):  # Struct initialization
+            fields = re.findall(r'\$(\w+):\s*(\$?\w+)', match.group(6))
+            return Token('VAR_DECL', (var_name, var_type, fields))
+        elif match.group(3):  # Function call
+            args = [a.split(':')[0].strip() for a in match.group(4).split(',')]
+            return Token('FUNC_CALL_ASSIGN', (var_name, match.group(3), args))
+        elif match.group(7):  # String
+            return Token('STR_DECL', (var_name, match.group(7)))
+        elif match.group(8):  # Integer
+            return Token('VAR_DECL', (var_name, var_type, int(match.group(8))))
+        elif match.group(9):  # BinOp
+            return Token('BIN_OP', (match.group(9), var_name, match.group(10), match.group(11)))
+        
+        raise SyntaxError(f"Invalid declaration: {line}")
 
     def _match_label(self, line):
         match = re.match(r'^\.(\w+):$', line)
@@ -121,6 +147,29 @@ class Lexer:
         if match:
             return Token('JUMP', (match.group(1), match.group(2)))
         raise SyntaxError(f"Invalid jump: {line}")
+
+    def _match_structdef(self, line):
+        # Allow newlines and multiple spaces
+        match = re.match(
+            r'structdef\s+(\w+)\s*{\s*((?:[\s\$]*\w+:\s*\w+;?\s*)*)\s*}', 
+            line, 
+            re.DOTALL
+        )
+        if not match:
+            raise SyntaxError(f"Invalid structdef: {line}")
+        
+        struct_name = match.group(1)
+        fields = []
+        # Split fields while ignoring empty entries
+        for field in re.split(r';\s*', match.group(2)):
+            field = field.strip()
+            if not field:
+                continue
+            name_type = re.match(r'\$(\w+):\s*(\w+)', field)
+            if name_type:
+                fields.append((name_type.group(1), name_type.group(2)))
+            
+        return Token('STRUCT_DEF', (struct_name, fields))
 
 class ASTNode:
     pass
@@ -155,9 +204,10 @@ class RetNode(ASTNode):
         self.value = value
 
 class VarDeclNode(ASTNode):
-    def __init__(self, name, value):
+    def __init__(self, name, var_type, value):
         self.name = name
-        self.value = value
+        self.type = var_type  # 'int', 'bytes', or struct name
+        self.value = value  # Could be int, str, or list of field values
 
 class BinOpNode(ASTNode):
     def __init__(self, op, result_var, left_var, right_var):
@@ -186,6 +236,11 @@ class JumpNode(ASTNode):
         self.condition = condition
         self.label = label
 
+class StructDefNode(ASTNode):
+    def __init__(self, name, fields):
+        self.name = name
+        self.fields = fields
+
 class Parser:
     def __init__(self, tokens):
         self.tokens = tokens
@@ -209,7 +264,13 @@ class Parser:
             elif token.type == 'RET':
                 ast.append(RetNode(token.value[0], token.value[1]))
             elif token.type == 'VAR_DECL':
-                ast.append(VarDeclNode(*token.value))
+                if len(token.value) == 3:  # Struct case
+                    name, var_type, value = token.value
+                    ast.append(VarDeclNode(name, var_type, value))
+                else:  # Regular variable
+                    name, value = token.value
+                    var_type = 'int' if isinstance(value, int) else 'bytes'
+                    ast.append(VarDeclNode(name, var_type, value))
             elif token.type == 'BIN_OP':
                 op, result_var, left, right = token.value
                 ast.append(BinOpNode(op, result_var, left, right))
@@ -221,5 +282,8 @@ class Parser:
                 ast.append(CmpNode(*token.value))
             elif token.type == 'JUMP':
                 ast.append(JumpNode(*token.value))
+            elif token.type == 'STRUCT_DEF':
+                name, fields = token.value
+                ast.append(StructDefNode(name, fields))
             self.pos += 1
         return ast
