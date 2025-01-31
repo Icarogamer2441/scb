@@ -81,7 +81,14 @@ class CodeGenerator:
             self.stack_offset += 8
     
     def _gen_bin_op(self, node):
-        target_offset = self.vars[node.result_var]
+        # Allocate stack space for the result variable first
+        result_var = node.result_var
+        if result_var not in self.vars:
+            offset = self.stack_offset + 16
+            self.vars[result_var] = offset
+            self.stack_offset += 8  # Allocate 8 bytes for 64-bit int
+
+        target_offset = self.vars[result_var]
         
         def get_operand(operand):
             if operand.startswith('$'):
