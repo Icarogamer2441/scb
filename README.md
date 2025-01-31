@@ -64,6 +64,7 @@ ret int 0;
 .loop:
     # ... code ...
     jmp .loop  # Unconditional jump
-    cmp je $a, $b, .target  # Conditional jump (jump if equal)
+    cmp $a, $b
+    je .target
 ```
 
