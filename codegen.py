@@ -88,7 +88,28 @@ class CodeGenerator:
                 self.text_section.append(f'    mov QWORD PTR [rbp - {offset}], {int_value}')
                 self.stack_offset += 8
                 return
-        if node.type in self.structs:
+        # Add string literal handling
+        elif node.type == 'bytes':
+            # Allocate stack space for pointer
+            offset = self.stack_offset + 16
+            self.vars[node.name] = (offset, 'bytes')
+            self.stack_offset += 8
+            
+            # Generate string literal in rodata
+            label = f'..LC{len(self.data_section)//4}'
+            self.data_section.extend([
+                f'.section .rodata',
+                f'.align 8',
+                f'{label}:',
+                f'    .asciz "{node.value}"'
+            ])
+            
+            # Store pointer to string
+            self.text_section.extend([
+                f'    lea rax, [{label} + rip]',
+                f'    mov QWORD PTR [rbp - {offset}], rax'
+            ])
+        elif node.type in self.structs:
             struct_fields = self.structs[node.type]
             struct_size = len(struct_fields) * 8
             base_offset = self.stack_offset + 16

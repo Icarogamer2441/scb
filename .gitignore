@@ -11,6 +11,7 @@ dist/
 *.egg
 *.whl
 *.dist-info
+*.spec
 
 examples/*.s
 tests/

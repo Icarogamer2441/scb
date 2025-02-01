@@ -12,6 +12,15 @@ SCB (Simple Compiler Backend) is a minimalistic compiler that translates a IR la
 - String and integer support
 - x86-64 assembly code generation
 
+## Installation
+
+```bash
+git clone https://github.com/Icarogamer2441/scb.git
+cd scb
+make build
+sudo make install
+```
+
 ## Language Syntax
 
 ### Data Definitions

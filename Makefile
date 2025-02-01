@@ -3,7 +3,7 @@ all: ./examples/vars ./examples/hello ./examples/funcs ./examples/labels ./examp
 ./examples/%: ./examples/%.scb
 	python3 scbc.py -c $<
 
-.PHONY: clean all runall
+.PHONY: clean all runall install uninstall scbclean
 
 clean:
 	rm -f ./examples/vars \
@@ -32,3 +32,20 @@ runall:
 	./examples/structs2
 	echo "Running enums\n"
 	./examples/enums
+
+build:
+	pyinstaller --onefile scbc.py
+
+install:
+	cp dist/scbc /usr/local/bin/scbc
+
+uninstall:
+	rm -f /usr/local/bin/scbc
+
+scbclean:
+	rm -rf build
+	rm -rf dist
+	rm -rf __pycache__
+	rm -rf *.spec
+	rm -rf *.pyc
+	rm -rf *.pyo

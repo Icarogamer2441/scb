@@ -90,7 +90,8 @@ class Lexer:
     def _match_funcdef(self, line):
         match = re.match(r'funcdef\s+%(\w+)\((.*)\)\s*->\s*\w+\s*{', line)
         if match:
-            params = [p.split(':')[0].strip() for p in match.group(2).split(',')]
+            # Strip $ from parameter names
+            params = [p.split(':')[0].strip().lstrip('$') for p in match.group(2).split(',')]
             return Token('FUNCDEF', (match.group(1), params))
         raise SyntaxError(f"Invalid funcdef: {line}")
     
@@ -111,17 +112,17 @@ class Lexer:
         raise SyntaxError(f"Invalid return: {line}")
 
     def _match_var_decl(self, line):
-        # Update regex to capture enum values
+        # Update regex group handling
         struct_init = r'(\w+)\s*{([^}]*)}'
         enum_value = r'(\w+)::(\w+)'
         pattern = (
             r'\$(\w+):\s*(\w+)\s*=\s*'
             r'(?:call\s+%(\w+)\((.*)\)|'
             f'{struct_init}|'
-            f'{enum_value}|'  # Add enum value matching
+            f'{enum_value}|'
             r'"([^"]*)"|'
-            r'(\d+)|'
-            r'([a-z]+)\s+(\$?\w+),\s*(\$?\w+)'
+            r'(\d+)|'  # Numeric literal
+            r'([a-z]+)\s+(\$?\w+),\s*(\$?\w+)'  # BinOp
             r')'
         )
         match = re.match(pattern, line)
@@ -131,6 +132,7 @@ class Lexer:
         
         var_name, var_type = match.group(1), match.group(2)
         
+        # Handle different declaration types
         if match.group(5):  # Struct initialization
             fields = re.findall(r'\$(\w+):\s*(\$?\w+)', match.group(6))
             return Token('VAR_DECL', (var_name, var_type, fields))
@@ -139,8 +141,12 @@ class Lexer:
         elif match.group(3):  # Function call
             args = [a.split(':')[0].strip() for a in match.group(4).split(',')]
             return Token('FUNC_CALL_ASSIGN', (var_name, match.group(3), args))
-        elif match.group(9):  # BinOp
-            return Token('BIN_OP', (match.group(9), var_name, match.group(10), match.group(11)))
+        elif match.group(9):  # String literal
+            return Token('VAR_DECL', (var_name, var_type, match.group(9)))
+        elif match.group(10):  # Numeric literal
+            return Token('VAR_DECL', (var_name, var_type, int(match.group(10))))
+        elif match.group(11):  # BinOp
+            return Token('BIN_OP', (match.group(11), var_name, match.group(12), match.group(13)))
         
         raise SyntaxError(f"Invalid declaration: {line}")
 
