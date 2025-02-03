@@ -1,0 +1,14 @@
+bssdef mybuff: bytesbuff = 100;
+datadef fmt: bytes = "%s";
+
+extern %printf;
+extern %scanf;
+
+funcdef %main() -> int {
+    $msg: bytes = "What's your name? ";
+    call %printf($msg: bytes);
+    call %scanf(fmt, mybuff);
+    $msg2: bytes = "Welcome %s!\n";
+    call %printf($msg2, mybuff);
+    ret int 0;
+}

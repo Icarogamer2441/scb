@@ -51,6 +51,10 @@ class Lexer:
                     in_enum = False
                 continue
                 
+            # Add bssdef handling
+            if line.startswith('bssdef'):
+                tokens.append(self._match_bssdef(line))
+                
             # Add label matching
             if line.startswith('.'):
                 tokens.append(self._match_label(line))
@@ -99,7 +103,16 @@ class Lexer:
         match = re.match(r'call\s+%(\w+)\((.*)\);', line)
         if match:
             func = match.group(1)
-            args = [a.split(':')[0].strip() for a in match.group(2).split(',')]
+            # Parse arguments with array access syntax
+            args = []
+            for arg in match.group(2).split(','):
+                arg = arg.split(':')[0].strip()
+                # Check for array access
+                array_match = re.match(r'(\$?\w+)<(\d+)>', arg)
+                if array_match:
+                    args.append(ArrayAccessNode(array_match.group(1), int(array_match.group(2))))
+                else:
+                    args.append(arg)
             return Token('CALL', (func, args))
         raise SyntaxError(f"Invalid call: {line}")
     
@@ -112,18 +125,23 @@ class Lexer:
         raise SyntaxError(f"Invalid return: {line}")
 
     def _match_var_decl(self, line):
-        # Update regex group handling
+        # Add missing regex pattern definitions
         struct_init = r'(\w+)\s*{([^}]*)}'
         enum_value = r'(\w+)::(\w+)'
+        array_access = r'(\$?\w+)<(\d+)>'
+        
+        # Rest of the pattern setup remains the same
         pattern = (
-            r'\$(\w+):\s*(\w+)\s*=\s*'
+            r'\$(\w+)\*?:\s*([\w*]+)\s*=\s*'  # Allow * in type
             r'(?:call\s+%(\w+)\((.*)\)|'
             f'{struct_init}|'
             f'{enum_value}|'
+            f'{array_access}|'
+            r'&(\$?\w+)|'  # Address-of operator
             r'"([^"]*)"|'
-            r'(\d+)|'  # Numeric literal
-            r'([a-z]+)\s+(\$?\w+),\s*(\$?\w+)'  # BinOp
-            r')'
+            r'(\d+)|'
+            r'([a-z]+)\s+(\$?\w+),\s*(\$?\w+)'
+            r')\s*;'
         )
         match = re.match(pattern, line)
         
@@ -133,20 +151,24 @@ class Lexer:
         var_name, var_type = match.group(1), match.group(2)
         
         # Handle different declaration types
-        if match.group(5):  # Struct initialization
-            fields = re.findall(r'\$(\w+):\s*(\$?\w+)', match.group(6))
-            return Token('VAR_DECL', (var_name, var_type, fields))
-        elif match.group(7):  # Enum value
-            return Token('ENUM_VALUE', (var_name, var_type, f"{match.group(7)}::{match.group(8)}"))
-        elif match.group(3):  # Function call
+        if match.group(3):  # Function call
             args = [a.split(':')[0].strip() for a in match.group(4).split(',')]
             return Token('FUNC_CALL_ASSIGN', (var_name, match.group(3), args))
-        elif match.group(9):  # String literal
-            return Token('VAR_DECL', (var_name, var_type, match.group(9)))
-        elif match.group(10):  # Numeric literal
-            return Token('VAR_DECL', (var_name, var_type, int(match.group(10))))
-        elif match.group(11):  # BinOp
-            return Token('BIN_OP', (match.group(11), var_name, match.group(12), match.group(13)))
+        elif match.group(5):  # Struct
+            fields = re.findall(r'\$(\w+):\s*(\$?\w+)', match.group(6))
+            return Token('VAR_DECL', (var_name, var_type, fields))
+        elif match.group(7):  # Enum
+            return Token('ENUM_VALUE', (var_name, var_type, f"{match.group(7)}::{match.group(8)}"))
+        elif match.group(9):  # Array access
+            return Token('ARRAY_ACCESS', (match.group(9), match.group(10)))
+        elif match.group(11):  # Address-of
+            return Token('ADDRESS_OF', (var_name, var_type, match.group(11)))
+        elif match.group(12):  # String
+            return Token('VAR_DECL', (var_name, var_type, match.group(12)))
+        elif match.group(13):  # Number
+            return Token('VAR_DECL', (var_name, var_type, int(match.group(13))))
+        elif match.group(14):  # BinOp
+            return Token('BIN_OP', (match.group(14), var_name, match.group(15), match.group(16)))
         
         raise SyntaxError(f"Invalid declaration: {line}")
 
@@ -204,6 +226,12 @@ class Lexer:
         enum_name = match.group(1)
         variants = [v.strip() for v in match.group(2).split(',') if v.strip()]
         return Token('ENUM_DEF', (enum_name, variants))
+
+    def _match_bssdef(self, line):
+        match = re.match(r'bssdef\s+(\w+):\s+bytesbuff\s*=\s*(\d+);', line)
+        if match:
+            return Token('BSS_DEF', (match.group(1), int(match.group(2))))
+        raise SyntaxError(f"Invalid bssdef: {line}")
 
 class ASTNode:
     pass
@@ -280,6 +308,22 @@ class EnumDefNode(ASTNode):
         self.name = name
         self.variants = variants
 
+class BssDefNode(ASTNode):
+    def __init__(self, name, size):
+        self.name = name
+        self.size = size
+
+class ArrayAccessNode(ASTNode):
+    def __init__(self, var_name, index):
+        self.var_name = var_name
+        self.index = index
+
+class AddressOfNode(ASTNode):
+    def __init__(self, var_name, var_type, target):
+        self.var_name = var_name
+        self.var_type = var_type
+        self.target = target
+
 class Parser:
     def __init__(self, tokens):
         self.tokens = tokens
@@ -330,5 +374,14 @@ class Parser:
             elif token.type == 'ENUM_VALUE':
                 name, var_type, value = token.value
                 ast.append(VarDeclNode(name, var_type, value))
+            elif token.type == 'BSS_DEF':
+                name, size = token.value
+                ast.append(BssDefNode(name, size))
+            elif token.type == 'ARRAY_ACCESS':
+                var_name, index = token.value
+                ast.append(ArrayAccessNode(var_name, int(index)))
+            elif token.type == 'ADDRESS_OF':
+                var_name, var_type, target = token.value
+                ast.append(AddressOfNode(var_name, var_type, target))
             self.pos += 1
         return ast

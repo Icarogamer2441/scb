@@ -1,4 +1,4 @@
-from parser_lexer import DataDefNode, ExternNode, FuncDefNode, CallNode, RetNode, VarDeclNode, BinOpNode, FuncCallAssignNode, StrDeclNode, LabelNode, CmpNode, JumpNode, StructDefNode, EnumDefNode
+from parser_lexer import DataDefNode, ExternNode, FuncDefNode, CallNode, RetNode, VarDeclNode, BinOpNode, FuncCallAssignNode, StrDeclNode, LabelNode, CmpNode, JumpNode, StructDefNode, EnumDefNode, BssDefNode, ArrayAccessNode, AddressOfNode
 
 class CodeGenerator:
     def __init__(self):
@@ -14,6 +14,8 @@ class CodeGenerator:
         for node in ast:
             if isinstance(node, StructDefNode):
                 self.structs[node.name] = node.fields
+            elif isinstance(node, BssDefNode):
+                self._gen_bss_def(node)
             elif isinstance(node, LabelNode):
                 self.text_section.append(f'.{node.name}:')
             elif isinstance(node, DataDefNode):
@@ -27,6 +29,8 @@ class CodeGenerator:
             elif isinstance(node, RetNode):
                 self._gen_ret(node)
             elif isinstance(node, VarDeclNode):
+                self._gen_var_decl(node)
+            elif isinstance(node, AddressOfNode):
                 self._gen_var_decl(node)
             elif isinstance(node, BinOpNode):
                 self._gen_bin_op(node)
@@ -75,8 +79,31 @@ class CodeGenerator:
             self.vars[param] = (offset, param)
             self.text_section.append(f'    mov [rbp - {offset}], {regs[i]}')
             self.stack_offset += 8
+        
+        # Special handling for main's argv
+        if node.name == 'main':
+            self.text_section.extend([
+                f'    mov [rbp - 8], rdi',   # Store argc
+                f'    mov [rbp - 16], rsi'   # Store argv
+            ])
+            self.vars['argc'] = (8, 'int')
+            self.vars['argv'] = (16, 'bytes**')
+            self.stack_offset = 16
     
     def _gen_var_decl(self, node):
+        if isinstance(node, AddressOfNode):
+            # Handle pointer declaration with address-of
+            offset = self.stack_offset + 16
+            self.vars[node.var_name] = (offset, node.var_type)
+            self.stack_offset += 8
+            
+            # Get target variable's address
+            target_offset, _ = self.vars[node.target]  # Use target name directly
+            self.text_section.extend([
+                f'    lea rax, [rbp - {target_offset}]',
+                f'    mov QWORD PTR [rbp - {offset}], rax'
+            ])
+            return
         # Handle enum values
         if node.type in self.enums:
             enum_values = self.enums[node.type]
@@ -183,9 +210,30 @@ class CodeGenerator:
         self.text_section.extend(asm)
     
     def _gen_call(self, node):
-        # Handle nested struct access
         processed_args = []
         for arg in node.args:
+            if isinstance(arg, str) and arg.startswith('$'):
+                # Handle pointer variables
+                var_name = arg[1:]  # Remove $
+                if var_name in self.vars:
+                    offset, var_type = self.vars[var_name]
+                    if '*' in var_type:  # Pointer type
+                        self.text_section.append(f'    mov rdi, QWORD PTR [rbp - {offset}]')
+                        processed_args.append('rdi')
+                        continue
+            if isinstance(arg, ArrayAccessNode):
+                # Strip $ from variable name
+                clean_var_name = arg.var_name.lstrip('$')
+                var_offset, _ = self.vars[clean_var_name]
+                self.text_section.extend([
+                    f'    mov rax, QWORD PTR [rbp - {var_offset}]',
+                    f'    mov rax, QWORD PTR [rax + {arg.index}*8]'
+                ])
+                processed_args.append('rax')
+                continue
+            if arg == 'mybuff':  # Handle buffer name directly
+                processed_args.append(arg)
+                continue
             if '->' in arg:
                 parts = [p.strip()[1:] for p in arg.split('->')]
                 current_var, *fields = parts
@@ -210,12 +258,14 @@ class CodeGenerator:
             if i >= len(regs):
                 break
                 
-            if arg.startswith('['):  # Direct memory reference (struct field)
+            if arg in ['rax', 'rbx', 'rcx', 'rdx', 'rdi', 'rsi', 'r8', 'r9']:  # Handle register args
+                self.text_section.append(f'    mov {regs[i]}, {arg}')
+            elif arg.startswith('['):  # Direct memory reference
                 self.text_section.append(f'    mov {regs[i]}, {arg}')
             elif arg.startswith('$'):
                 offset, _ = self.vars[arg[1:]]
                 if ': bytes' in arg:  # String pointer
-                    self.text_section.append(f'    lea {regs[i]}, [rbp - {offset}]')
+                    self.text_section.append(f'    mov {regs[i]}, QWORD PTR [rbp - {offset}]')
                 else:  # Regular variable
                     self.text_section.append(f'    mov {regs[i]}, QWORD PTR [rbp - {offset}]')
             else:  # Global data reference
@@ -295,6 +345,15 @@ class CodeGenerator:
 
     def _gen_jump(self, node):
         self.text_section.append(f'    {node.condition} .{node.label}')
+    
+    def _gen_bss_def(self, node):
+        self.data_section.extend([
+            f'.section .bss',
+            f'.globl {node.name}',
+            f'.align 32',  # Align to 32-byte boundary
+            f'{node.name}:',
+            f'    .space {node.size}'
+        ])
     
     def _finalize_asm(self):
         assembly = [

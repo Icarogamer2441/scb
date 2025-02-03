@@ -1,0 +1,10 @@
+datadef fmt: bytes = "%p, %s\n";
+
+extern %printf;
+
+funcdef %main() -> int {
+    $msg1: bytes = "Hello, World!\n";
+    $msg2*: bytes = &msg1;
+    call %printf(fmt, $msg2, $msg2<0>);
+    ret int 0;
+}
