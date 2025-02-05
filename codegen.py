@@ -341,8 +341,13 @@ class CodeGenerator:
         
         left = get_operand(node.left)
         right = get_operand(node.right)
-        self.text_section.append(f'    cmp {left}, {right}')
-
+        
+        # Load right operand into register first
+        self.text_section.extend([
+            f'    mov rax, {right}',
+            f'    cmp {left}, rax'
+        ])
+    
     def _gen_jump(self, node):
         self.text_section.append(f'    {node.condition} .{node.label}')
     
