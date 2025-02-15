@@ -1,4 +1,5 @@
-from parser_lexer import DataDefNode, ExternNode, FuncDefNode, CallNode, RetNode, VarDeclNode, BinOpNode, FuncCallAssignNode, StrDeclNode, LabelNode, CmpNode, JumpNode, StructDefNode, EnumDefNode, BssDefNode, ArrayAccessNode, AddressOfNode
+from parser_lexer import DataDefNode, ExternNode, FuncDefNode, CallNode, RetNode, VarDeclNode, BinOpNode, FuncCallAssignNode, StrDeclNode, LabelNode, CmpNode, JumpNode, StructDefNode, EnumDefNode, BssDefNode, ArrayAccessNode, AddressOfNode, PointerDerefNode
+import re
 
 class CodeGenerator:
     def __init__(self):
@@ -115,7 +116,6 @@ class CodeGenerator:
                 self.text_section.append(f'    mov QWORD PTR [rbp - {offset}], {int_value}')
                 self.stack_offset += 8
                 return
-        # Add string literal handling
         elif node.type == 'bytes':
             # Allocate stack space for pointer
             offset = self.stack_offset + 16
@@ -156,6 +156,22 @@ class CodeGenerator:
                 else:
                     # Literal value
                     self.text_section.append(f'    mov QWORD PTR [rbp - {offset}], {field_value}')
+        elif re.match(r'\w+\[\d+\]', node.type):
+            m = re.match(r'(\w+)\[(\d+)\]', node.type)
+            base_type = m.group(1)
+            count = int(m.group(2))
+            # Parse comma-separated integers from the array literal (node.value)
+            values = [int(x.strip()) for x in node.value.split(',')]
+            if len(values) != count:
+                raise ValueError(f"Array literal for {node.name} expects {count} values, got {len(values)}")
+            base_offset = self.stack_offset + 16
+            self.vars[node.name] = (base_offset, node.type)
+            element_size = 8  # assuming 8 bytes per int element
+            self.stack_offset += count * element_size
+            for i, value in enumerate(values):
+                offset = base_offset + i * element_size
+                self.text_section.append(f'    mov QWORD PTR [rbp - {offset}], {value}')
+            return
         elif isinstance(node.value, int):
             offset = self.stack_offset + 16
             self.vars[node.name] = (offset, node.type)
@@ -212,43 +228,55 @@ class CodeGenerator:
     def _gen_call(self, node):
         processed_args = []
         for arg in node.args:
+            # NEW: Handle pointer dereference nodes (using '<>')
+            if isinstance(arg, PointerDerefNode):
+                clean_var_name = arg.var_name.lstrip('$')
+                offset, _ = self.vars[clean_var_name]
+                # Load pointer value from its stack location
+                self.text_section.append(f'    mov rax, QWORD PTR [rbp - {offset}]')
+                pointer_offset = arg.index * 8  # scale offset by element size (assumed 8 bytes)
+                if pointer_offset != 0:
+                    self.text_section.append(f'    add rax, {pointer_offset}')
+                # Now dereference the pointer
+                self.text_section.append(f'    mov rax, QWORD PTR [rax]')
+                processed_args.append('rax')
+                continue
+            
+            # Existing case for simple variable usage
             if isinstance(arg, str) and arg.startswith('$'):
-                # Handle pointer variables
                 var_name = arg[1:]  # Remove $
                 if var_name in self.vars:
                     offset, var_type = self.vars[var_name]
-                    if '*' in var_type:  # Pointer type
+                    if '*' in var_type:  # Pointer variable used directly
                         self.text_section.append(f'    mov rdi, QWORD PTR [rbp - {offset}]')
                         processed_args.append('rdi')
                         continue
+            
+            # Handle array accesses (now using square brackets '[]')
             if isinstance(arg, ArrayAccessNode):
-                # Strip $ from variable name
                 clean_var_name = arg.var_name.lstrip('$')
                 var_offset, _ = self.vars[clean_var_name]
-                self.text_section.extend([
-                    f'    mov rax, QWORD PTR [rbp - {var_offset}]',
-                    f'    mov rax, QWORD PTR [rax + {arg.index}*8]'
-                ])
+                element_offset = var_offset + arg.index * 8
+                self.text_section.append(f'    mov rax, QWORD PTR [rbp - {element_offset}]')
                 processed_args.append('rax')
                 continue
+            
             if arg == 'mybuff':  # Handle buffer name directly
                 processed_args.append(arg)
                 continue
+            
             if '->' in arg:
                 parts = [p.strip()[1:] for p in arg.split('->')]
                 current_var, *fields = parts
                 current_offset, current_type = self.vars[current_var]
                 total_offset = current_offset
-                
                 for field in fields:
                     if current_type not in self.structs:
                         break  # Stop if not a struct type
                     struct_fields = self.structs[current_type]
-                    field_index = next(i for i, (name, _) in enumerate(struct_fields) 
-                                    if name == field)
+                    field_index = next(i for i, (name, _) in enumerate(struct_fields) if name == field)
                     total_offset += field_index * 8
                     current_type = struct_fields[field_index][1]
-                
                 processed_args.append(f'[rbp - {total_offset}]')
             else:
                 processed_args.append(arg)
@@ -257,20 +285,18 @@ class CodeGenerator:
         for i, arg in enumerate(processed_args):
             if i >= len(regs):
                 break
-                
-            if arg in ['rax', 'rbx', 'rcx', 'rdx', 'rdi', 'rsi', 'r8', 'r9']:  # Handle register args
+            if arg in ['rax', 'rbx', 'rcx', 'rdx', 'rdi', 'rsi', 'r8', 'r9']:
                 self.text_section.append(f'    mov {regs[i]}, {arg}')
-            elif arg.startswith('['):  # Direct memory reference
+            elif arg.startswith('['):
                 self.text_section.append(f'    mov {regs[i]}, {arg}')
             elif arg.startswith('$'):
                 offset, _ = self.vars[arg[1:]]
                 if ': bytes' in arg:  # String pointer
                     self.text_section.append(f'    mov {regs[i]}, QWORD PTR [rbp - {offset}]')
-                else:  # Regular variable
+                else:
                     self.text_section.append(f'    mov {regs[i]}, QWORD PTR [rbp - {offset}]')
             else:  # Global data reference
                 self.text_section.append(f'    lea {regs[i]}, [{arg} + rip]')
-        
         self.text_section.append('    xor rax, rax')
         self.text_section.append(f'    call {node.func}')
     

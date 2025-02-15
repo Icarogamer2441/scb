@@ -103,16 +103,20 @@ class Lexer:
         match = re.match(r'call\s+%(\w+)\((.*)\);', line)
         if match:
             func = match.group(1)
-            # Parse arguments with array access syntax
             args = []
             for arg in match.group(2).split(','):
                 arg = arg.split(':')[0].strip()
-                # Check for array access
-                array_match = re.match(r'(\$?\w+)<(\d+)>', arg)
+                # Check for pointer dereference using "<>"
+                pointer_match = re.match(r'(\$?\w+)<(\d+)>', arg)
+                if pointer_match:
+                    args.append(PointerDerefNode(pointer_match.group(1), int(pointer_match.group(2))))
+                    continue
+                # Check for array access using "[]"
+                array_match = re.match(r'(\$?\w+)\[(\d+)\]', arg)
                 if array_match:
                     args.append(ArrayAccessNode(array_match.group(1), int(array_match.group(2))))
-                else:
-                    args.append(arg)
+                    continue
+                args.append(arg)
             return Token('CALL', (func, args))
         raise SyntaxError(f"Invalid call: {line}")
     
@@ -125,50 +129,54 @@ class Lexer:
         raise SyntaxError(f"Invalid return: {line}")
 
     def _match_var_decl(self, line):
-        # Add missing regex pattern definitions
+        # Updated regex pattern to support array initializers and types like int[10]
         struct_init = r'(\w+)\s*{([^}]*)}'
         enum_value = r'(\w+)::(\w+)'
-        array_access = r'(\$?\w+)<(\d+)>'
-        
-        # Rest of the pattern setup remains the same
+        # NEW: Pointer dereference uses "<...>"
+        pointer_access = r'(\$?\w+)<(\d+)>'
+        # Update array access to use square brackets: "[...]"
+        array_access = r'(\$?\w+)\[(\d+)\]'
         pattern = (
-            r'\$(\w+)\*?:\s*([\w*]+)\s*=\s*'  # Allow * in type
+            r'\$(\w+)\*?:\s*([\w\[\]]+)\s*=\s*'  # allow types like int[10]
             r'(?:call\s+%(\w+)\((.*)\)|'
             f'{struct_init}|'
             f'{enum_value}|'
-            f'{array_access}|'
-            r'&(\$?\w+)|'  # Address-of operator
-            r'"([^"]*)"|'
-            r'(\d+)|'
-            r'([a-z]+)\s+(\$?\w+),\s*(\$?\w+)'
+            r'array\s+((?:-?\d+\s*,\s*)*-?\d+)|'
+            f'{pointer_access}|'  # NEW alternative for pointer dereference
+            f'{array_access}|'    # Updated alternative for array access
+            r'&(\$?\w+)|'        # Address-of operator
+            r'"([^"]*)"|'        # String literal
+            r'(\d+)|'            # Number
+            r'([a-z]+)\s+(\$?\w+),\s*(\$?\w+)'  # BinOp
             r')\s*;'
         )
         match = re.match(pattern, line)
-        
         if not match:
             raise SyntaxError(f"Invalid declaration: {line}")
         
         var_name, var_type = match.group(1), match.group(2)
-        
-        # Handle different declaration types
         if match.group(3):  # Function call
             args = [a.split(':')[0].strip() for a in match.group(4).split(',')]
             return Token('FUNC_CALL_ASSIGN', (var_name, match.group(3), args))
-        elif match.group(5):  # Struct
+        elif match.group(5):  # Struct initializer
             fields = re.findall(r'\$(\w+):\s*(\$?\w+)', match.group(6))
             return Token('VAR_DECL', (var_name, var_type, fields))
-        elif match.group(7):  # Enum
+        elif match.group(7):  # Enum value
             return Token('ENUM_VALUE', (var_name, var_type, f"{match.group(7)}::{match.group(8)}"))
-        elif match.group(9):  # Array access
-            return Token('ARRAY_ACCESS', (match.group(9), match.group(10)))
-        elif match.group(11):  # Address-of
-            return Token('ADDRESS_OF', (var_name, var_type, match.group(11)))
-        elif match.group(12):  # String
-            return Token('VAR_DECL', (var_name, var_type, match.group(12)))
-        elif match.group(13):  # Number
-            return Token('VAR_DECL', (var_name, var_type, int(match.group(13))))
-        elif match.group(14):  # BinOp
-            return Token('BIN_OP', (match.group(14), var_name, match.group(15), match.group(16)))
+        elif match.group(9):  # Array initializer (new)
+            return Token('VAR_DECL', (var_name, var_type, match.group(9)))
+        elif match.group(10):  # Pointer dereference (e.g. $ptr<0>)
+            return Token('POINTER_DEREF', (var_name, int(match.group(11))))
+        elif match.group(12):  # Array access (e.g. $arr[0])
+            return Token('ARRAY_ACCESS', (var_name, int(match.group(13))))
+        elif match.group(14):  # Address-of
+            return Token('ADDRESS_OF', (var_name, var_type, match.group(14)))
+        elif match.group(15):  # String literal
+            return Token('VAR_DECL', (var_name, var_type, match.group(15)))
+        elif match.group(16):  # Number literal
+            return Token('VAR_DECL', (var_name, var_type, int(match.group(16))))
+        elif match.group(17):  # BinOp
+            return Token('BIN_OP', (match.group(17), var_name, match.group(18), match.group(19)))
         
         raise SyntaxError(f"Invalid declaration: {line}")
 
@@ -324,6 +332,11 @@ class AddressOfNode(ASTNode):
         self.var_type = var_type
         self.target = target
 
+class PointerDerefNode(ASTNode):
+    def __init__(self, var_name, index):
+        self.var_name = var_name
+        self.index = index
+
 class Parser:
     def __init__(self, tokens):
         self.tokens = tokens
@@ -354,6 +367,9 @@ class Parser:
                     name, value = token.value
                     var_type = 'int' if isinstance(value, int) else 'bytes'
                     ast.append(VarDeclNode(name, var_type, value))
+            elif token.type == 'POINTER_DEREF':
+                var_name, index = token.value
+                ast.append(PointerDerefNode(var_name, index))
             elif token.type == 'BIN_OP':
                 op, result_var, left, right = token.value
                 ast.append(BinOpNode(op, result_var, left, right))

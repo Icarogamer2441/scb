@@ -1,7 +1,8 @@
-all: ./examples/vars ./examples/hello ./examples/funcs ./examples/labels ./examples/char ./examples/structs ./examples/structs2 ./examples/enums ./examples/stringbuff ./examples/pointer ./examples/pointer2
+all: ./examples/vars ./examples/hello ./examples/funcs ./examples/labels ./examples/char ./examples/structs ./examples/structs2 ./examples/enums ./examples/stringbuff ./examples/pointer ./examples/pointer2 ./examples/arrays
 
 ./examples/%: ./examples/%.scb
 	python3 scbc.py -c $<
+	python3 scbc.py $<
 
 .PHONY: clean all runall install uninstall scbclean
 
@@ -16,7 +17,9 @@ clean:
 	      ./examples/enums \
 	      ./examples/stringbuff \
 	      ./examples/pointer \
-	      ./examples/pointer2
+	      ./examples/pointer2 \
+	      ./examples/arrays \
+	      ./examples/*.s
 
 runall:
 	echo "Running vars\n"
@@ -41,6 +44,8 @@ runall:
 	./examples/pointer
 	echo "Running pointer2\n"
 	./examples/pointer2
+	echo "Running arrays\n"
+	./examples/arrays
 
 build:
 	pyinstaller --onefile scbc.py
