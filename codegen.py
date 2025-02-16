@@ -225,6 +225,18 @@ class CodeGenerator:
                 f'    cqo',
                 f'    idiv {right}'
             ]
+        elif node.op == 'shr':
+            asm = [
+                f'    mov rax, {left}',
+                f'    mov rcx, {right}',
+                f'    shr rax, cl'
+            ]
+        elif node.op == 'shl':
+            asm = [
+                f'    mov rax, {left}',
+                f'    mov rcx, {right}',
+                f'    shl rax, cl'
+            ]
         
         asm.append(f'    mov QWORD PTR [rbp - {target_offset}], rax')
         self.text_section.extend(asm)

@@ -1,0 +1,11 @@
+datadef fmt: bytes = "shift right (1 >> 2): %d\nshift left (1 << 2): %d\n";
+
+funcdef %main() -> int {
+    $x: int = 1;
+    $y: int = 2;
+    $r: int = shr $x, $y;
+    $s: int = shl $x, $y;
+
+    call %printf(fmt: bytes, $r: int, $s: int);
+    ret int 0;
+}

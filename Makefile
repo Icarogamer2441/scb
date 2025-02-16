@@ -1,4 +1,4 @@
-all: ./examples/vars ./examples/hello ./examples/funcs ./examples/labels ./examples/char ./examples/structs ./examples/structs2 ./examples/enums ./examples/stringbuff ./examples/pointer ./examples/pointer2 ./examples/arrays
+all: ./examples/vars ./examples/hello ./examples/funcs ./examples/labels ./examples/char ./examples/structs ./examples/structs2 ./examples/enums ./examples/stringbuff ./examples/pointer ./examples/pointer2 ./examples/arrays ./examples/shifts
 
 ./examples/%: ./examples/%.scb
 	python3 scbc.py -c $<
@@ -19,6 +19,7 @@ clean:
 	      ./examples/pointer \
 	      ./examples/pointer2 \
 	      ./examples/arrays \
+	      ./examples/shifts \
 	      ./examples/*.s
 
 runall:
@@ -46,6 +47,8 @@ runall:
 	./examples/pointer2
 	echo "Running arrays\n"
 	./examples/arrays
+	echo "Running shifts\n"
+	./examples/shifts
 
 build:
 	pyinstaller --onefile scbc.py
