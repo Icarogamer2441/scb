@@ -1,0 +1,8 @@
+datadef fmt: bytes = "%d\n";
+
+funcdef %main() -> int {
+    $x: int = 1;
+    $x2: int = get $x;
+    call %printf(fmt: bytes, $x2: int);
+    ret int 0;
+}

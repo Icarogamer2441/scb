@@ -49,6 +49,8 @@ class CodeGenerator:
                 self._gen_array_assign(node)
             elif isinstance(node, ArrayAssignNode):
                 self._gen_array_assign(node)
+            elif hasattr(node, 'var_name') and hasattr(node, 'target') and type(node).__name__ == 'GetNode':
+                self._gen_get(node)
         return self._finalize_asm()
     
     def _gen_data_def(self, node):
@@ -424,6 +426,22 @@ class CodeGenerator:
                 self.text_section.append(f'    mov QWORD PTR [rbp - {element_offset}], rax')
             else:
                 self.text_section.append(f'    mov QWORD PTR [rbp - {element_offset}], {node.value}')
+    
+    def _gen_get(self, node):
+        # Allocate stack space for the new variable
+        offset = self.stack_offset + 16
+        self.vars[node.var_name] = (offset, node.var_type)
+        self.stack_offset += 8
+
+        # Determine the source variable name (strip leading '$' if present)
+        target_name = node.target.lstrip('$')
+        if target_name not in self.vars:
+            raise ValueError(f"Variable '{target_name}' not declared for get operation")
+        source_offset, _ = self.vars[target_name]
+
+        # Load the value from the target variable into rax and store it to the new variable's slot
+        self.text_section.append(f'    mov rax, QWORD PTR [rbp - {source_offset}]')
+        self.text_section.append(f'    mov QWORD PTR [rbp - {offset}], rax')
     
     def _finalize_asm(self):
         assembly = [

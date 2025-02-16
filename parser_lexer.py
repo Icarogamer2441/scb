@@ -133,6 +133,15 @@ class Lexer:
         raise SyntaxError(f"Invalid return: {line}")
 
     def _match_var_decl(self, line):
+        # NEW: Handle "get" keyword for variable declarations, e.g.,
+        # "$x2: int = get $x;"
+        if re.search(r'=\s*get\s+\$?\w+\s*;', line):
+            match = re.match(r'\$(\w+)\*?:\s*([\w\[\]]+)\s*=\s*get\s+(\$?\w+)\s*;', line)
+            if match:
+                var_name = match.group(1)
+                var_type = match.group(2)
+                target = match.group(3)
+                return Token('GET', (var_name, var_type, target))
         # Updated regex pattern to support array initializers and types like int[10]
         struct_init = r'(\w+)\s*{([^}]*)}'
         enum_value = r'(\w+)::(\w+)'
@@ -296,7 +305,14 @@ class VarDeclNode(ASTNode):
     def __init__(self, name, var_type, value):
         self.name = name
         self.type = var_type  # 'int', 'bytes', or struct name
-        self.value = value  # Could be int, str, or list of field values
+        self.value = value
+
+# NEW: Define a new AST node for the "get" operation
+class GetNode(ASTNode):
+    def __init__(self, var_name, var_type, target):
+        self.var_name = var_name
+        self.var_type = var_type
+        self.target = target
 
 class BinOpNode(ASTNode):
     def __init__(self, op, result_var, left_var, right_var):
@@ -371,7 +387,6 @@ class Parser:
         ast = []
         while self.pos < len(self.tokens):
             token = self.tokens[self.pos]
-            # Add label handling
             if token.type == 'LABEL':
                 ast.append(LabelNode(token.value))
             elif token.type == 'DATA_DEF':
@@ -384,11 +399,15 @@ class Parser:
                 ast.append(CallNode(*token.value))
             elif token.type == 'RET':
                 ast.append(RetNode(token.value[0], token.value[1]))
+            elif token.type == 'GET':
+                # NEW: Handle "get" declarations
+                name, var_type, target = token.value
+                ast.append(GetNode(name, var_type, target))
             elif token.type == 'VAR_DECL':
-                if len(token.value) == 3:  # Struct case
+                if len(token.value) == 3:  # Struct initializer or similar
                     name, var_type, value = token.value
                     ast.append(VarDeclNode(name, var_type, value))
-                else:  # Regular variable
+                else:  # Regular variable declaration
                     name, value = token.value
                     var_type = 'int' if isinstance(value, int) else 'bytes'
                     ast.append(VarDeclNode(name, var_type, value))
