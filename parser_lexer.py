@@ -70,7 +70,11 @@ class Lexer:
             elif line.startswith('ret'):
                 tokens.append(self._match_ret(line))
             elif line.startswith('$'):
-                tokens.append(self._match_var_decl(line))
+                # If the line starts with $<name>[..., it's an array element assignment.
+                if re.match(r'^\$\w+\[', line):
+                    tokens.append(self._match_array_assign(line))
+                else:
+                    tokens.append(self._match_var_decl(line))
             elif 'add' in line:
                 tokens.append(self._match_binop(line))
             elif line.startswith('cmp'):
@@ -241,6 +245,21 @@ class Lexer:
             return Token('BSS_DEF', (match.group(1), int(match.group(2))))
         raise SyntaxError(f"Invalid bssdef: {line}")
 
+    def _match_array_assign(self, line):
+        # Matches an array element assignment e.g., "$arr[0] = 10;"
+        match = re.match(r'\$(\w+)\[(\d+)\]\s*=\s*(.+);', line)
+        if match:
+            var_name = match.group(1)
+            index = int(match.group(2))
+            value_str = match.group(3).strip()
+            # If value is a number, convert it to int; else leave as string (e.g. variable reference).
+            if re.match(r'^-?\d+$', value_str):
+                value = int(value_str)
+            else:
+                value = value_str
+            return Token('ARRAY_ASSIGN', (var_name, index, value))
+        raise SyntaxError(f"Invalid array assignment: {line}")
+
 class ASTNode:
     pass
 
@@ -337,6 +356,12 @@ class PointerDerefNode(ASTNode):
         self.var_name = var_name
         self.index = index
 
+class ArrayAssignNode(ASTNode):
+    def __init__(self, var_name, index, value):
+        self.var_name = var_name
+        self.index = index
+        self.value = value
+
 class Parser:
     def __init__(self, tokens):
         self.tokens = tokens
@@ -367,6 +392,9 @@ class Parser:
                     name, value = token.value
                     var_type = 'int' if isinstance(value, int) else 'bytes'
                     ast.append(VarDeclNode(name, var_type, value))
+            elif token.type == 'ARRAY_ASSIGN':
+                var_name, index, value = token.value
+                ast.append(ArrayAssignNode(var_name, int(index), value))
             elif token.type == 'POINTER_DEREF':
                 var_name, index = token.value
                 ast.append(PointerDerefNode(var_name, index))

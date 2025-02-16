@@ -1,4 +1,4 @@
-from parser_lexer import DataDefNode, ExternNode, FuncDefNode, CallNode, RetNode, VarDeclNode, BinOpNode, FuncCallAssignNode, StrDeclNode, LabelNode, CmpNode, JumpNode, StructDefNode, EnumDefNode, BssDefNode, ArrayAccessNode, AddressOfNode, PointerDerefNode
+from parser_lexer import DataDefNode, ExternNode, FuncDefNode, CallNode, RetNode, VarDeclNode, BinOpNode, FuncCallAssignNode, StrDeclNode, LabelNode, CmpNode, JumpNode, StructDefNode, EnumDefNode, BssDefNode, ArrayAccessNode, AddressOfNode, PointerDerefNode, ArrayAssignNode
 import re
 
 class CodeGenerator:
@@ -45,6 +45,10 @@ class CodeGenerator:
                 self._gen_jump(node)
             elif isinstance(node, EnumDefNode):
                 self.enums[node.name] = {variant: i for i, variant in enumerate(node.variants)}
+            elif 'ArrayAssignNode' in str(type(node)):
+                self._gen_array_assign(node)
+            elif isinstance(node, ArrayAssignNode):
+                self._gen_array_assign(node)
         return self._finalize_asm()
     
     def _gen_data_def(self, node):
@@ -385,6 +389,29 @@ class CodeGenerator:
             f'{node.name}:',
             f'    .space {node.size}'
         ])
+    
+    def _gen_array_assign(self, node):
+        """
+        Generates code for an array element assignment.
+        Example: "$arr[0] = 10;" will store 10 into the first element of the array.
+        """
+        if node.var_name not in self.vars:
+            raise ValueError(f"Array variable {node.var_name} not declared")
+        base_offset, var_type = self.vars[node.var_name]
+        element_offset = base_offset + node.index * 8  # assuming 8 bytes per element
+        if isinstance(node.value, int):
+            self.text_section.append(f'    mov QWORD PTR [rbp - {element_offset}], {node.value}')
+        elif isinstance(node.value, str):
+            # Handle cases where the right-hand side is a variable reference (e.g., $x)
+            if node.value.startswith('$'):
+                ref_var = node.value[1:]
+                if ref_var not in self.vars:
+                    raise ValueError(f"Variable {ref_var} not declared")
+                off, _ = self.vars[ref_var]
+                self.text_section.append(f'    mov rax, QWORD PTR [rbp - {off}]')
+                self.text_section.append(f'    mov QWORD PTR [rbp - {element_offset}], rax')
+            else:
+                self.text_section.append(f'    mov QWORD PTR [rbp - {element_offset}], {node.value}')
     
     def _finalize_asm(self):
         assembly = [

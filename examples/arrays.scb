@@ -2,6 +2,8 @@ datadef fmt: bytes = "%d\n";
 
 funcdef %main() -> int {
     $arr: int[10] = array 1, 2, 3, 4, 5, 6, 7, 8, 9, 10;
+    $arr[0] = 10;
     call %printf(fmt: bytes, $arr[2]: int);
+    call %printf(fmt: bytes, $arr[0]: int);
     ret int 0;
 }
