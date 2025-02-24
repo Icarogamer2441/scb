@@ -1,4 +1,4 @@
-from parser_lexer import DataDefNode, ExternNode, FuncDefNode, CallNode, RetNode, VarDeclNode, BinOpNode, FuncCallAssignNode, StrDeclNode, LabelNode, CmpNode, JumpNode, StructDefNode, EnumDefNode, BssDefNode, ArrayAccessNode, AddressOfNode, PointerDerefNode, ArrayAssignNode
+from parser_lexer import DataDefNode, ExternNode, FuncDefNode, CallNode, RetNode, VarDeclNode, BinOpNode, FuncCallAssignNode, StrDeclNode, LabelNode, CmpNode, JumpNode, StructDefNode, EnumDefNode, BssDefNode, ArrayAccessNode, AddressOfNode, PointerDerefNode, ArrayAssignNode, PushNode, PopNode
 import re
 
 class CodeGenerator:
@@ -10,6 +10,8 @@ class CodeGenerator:
         self.vars = {}  # Now stores (offset, type) tuples
         self.structs = {}
         self.enums = {}
+        self.func_prologue_index = None
+        self.func_prologue_index_updated = False
     
     def generate(self, ast):
         for node in ast:
@@ -51,6 +53,10 @@ class CodeGenerator:
                 self._gen_array_assign(node)
             elif hasattr(node, 'var_name') and hasattr(node, 'target') and type(node).__name__ == 'GetNode':
                 self._gen_get(node)
+            elif isinstance(node, PushNode):
+                self._gen_push(node)
+            elif isinstance(node, PopNode):
+                self._gen_pop(node)
         return self._finalize_asm()
     
     def _gen_data_def(self, node):
@@ -73,8 +79,10 @@ class CodeGenerator:
             f'{node.name}:',
             '    push rbp',
             '    mov rbp, rsp',
-            f'    sub rsp, {((len(node.params) * 8) + 63) & ~63}'  # Align to 64 bytes
+            '    sub rsp, STACK_SIZE_PLACEHOLDER'  # Placeholder, optimized later
         ])
+        # Record the index of our placeholder prologue line for later update.
+        self.func_prologue_index = len(self.text_section) - 1
         # Reset stack offset for local variables
         self.stack_offset = 0
         self.vars = {}
@@ -149,19 +157,33 @@ class CodeGenerator:
             self.vars[node.name] = (base_offset, node.type)
             self.stack_offset += struct_size
             
-            for i, (field, _) in enumerate(struct_fields):
-                field_value = node.value[i][1]  # Get value from (field, value) tuple
+            for i, (field, field_type) in enumerate(struct_fields):
+                field_value = node.value[i][1]
                 offset = base_offset + i * 8
-                if field_value.startswith('$'):
-                    # Copy from another variable
-                    src_offset, _ = self.vars[field_value[1:]]
+                
+                if field_type == 'bytes' and field_value.startswith('"'):
+                    # Handle string literals in structs
+                    label = f'..LC{len(self.data_section)//4}'
+                    self.data_section.extend([
+                        f'.section .rodata',
+                        f'.align 8',
+                        f'{label}:',
+                        f'    .asciz {field_value}'
+                    ])
                     self.text_section.extend([
-                        f'    mov rax, QWORD PTR [rbp - {src_offset}]',
+                        f'    lea rax, [{label} + rip]',
                         f'    mov QWORD PTR [rbp - {offset}], rax'
                     ])
                 else:
-                    # Literal value
-                    self.text_section.append(f'    mov QWORD PTR [rbp - {offset}], {field_value}')
+                    # Existing handling for other types
+                    if field_value.startswith('$'):
+                        src_offset, _ = self.vars[field_value[1:]]
+                        self.text_section.extend([
+                            f'    mov rax, QWORD PTR [rbp - {src_offset}]',
+                            f'    mov QWORD PTR [rbp - {offset}], rax'
+                        ])
+                    else:
+                        self.text_section.append(f'    mov QWORD PTR [rbp - {offset}], {field_value}')
         elif re.match(r'\w+\[\d+\]', node.type):
             m = re.match(r'(\w+)\[(\d+)\]', node.type)
             base_type = m.group(1)
@@ -319,13 +341,20 @@ class CodeGenerator:
         self.text_section.append(f'    call {node.func}')
     
     def _gen_ret(self, node):
+        # If this is the first RET in the current function, patch the placeholder
+        if self.func_prologue_index is not None:
+            final_offset = ((self.stack_offset + 63) // 64) * 64
+            self.text_section[self.func_prologue_index] = f'    sub rsp, {final_offset}'
+            # Clear the index so that subsequent RET nodes do not re-patch
+            self.func_prologue_index = None
+
         if node.ret_type != 'void':
             if node.value.startswith('$'):
                 offset, _ = self.vars[node.value[1:]]
                 self.text_section.append(f'    mov eax, DWORD PTR [rbp - {offset}]')
             else:
                 self.text_section.append(f'    mov eax, {node.value}')
-        
+
         self.text_section.extend([
             '    mov rsp, rbp',
             '    pop rbp',
@@ -442,6 +471,34 @@ class CodeGenerator:
         # Load the value from the target variable into rax and store it to the new variable's slot
         self.text_section.append(f'    mov rax, QWORD PTR [rbp - {source_offset}]')
         self.text_section.append(f'    mov QWORD PTR [rbp - {offset}], rax')
+    
+    def _gen_push(self, node):
+        if node.value.startswith('"'):
+            # Handle string literals
+            label = f'..LC{len(self.data_section)//4}'
+            self.data_section.extend([
+                f'.section .rodata',
+                f'.align 8',
+                f'{label}:',
+                f'    .asciz {node.value}'
+            ])
+            self.text_section.extend([
+                f'    lea rax, [{label} + rip]',
+                '    push rax'
+            ])
+        else:
+            # Handle integers
+            self.text_section.append(f'    push {node.value}')
+    
+    def _gen_pop(self, node):
+        offset = self.stack_offset + 16
+        self.vars[node.var_name] = (offset, node.var_type)
+        self.stack_offset += 8
+        
+        if node.var_type == 'bytes':
+            self.text_section.append(f'    pop QWORD PTR [rbp - {offset}]')
+        else:
+            self.text_section.append(f'    pop QWORD PTR [rbp - {offset}]')
     
     def _finalize_asm(self):
         assembly = [

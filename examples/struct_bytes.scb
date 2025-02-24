@@ -1,0 +1,12 @@
+datadef fmt: bytes = "text: \"%s\" id: %d\n";
+
+structdef Message {
+    $id: int;
+    $text: bytes;
+}
+
+funcdef %main() -> int {
+    $msg: Message = Message { $id: 1, $text: "Hello from struct!" };
+    call %printf(fmt: bytes, $msg->$text: bytes, $msg->$id: int);
+    ret int 0;
+} 

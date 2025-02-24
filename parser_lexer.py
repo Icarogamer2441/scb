@@ -69,6 +69,13 @@ class Lexer:
                 tokens.append(self._match_call(line))
             elif line.startswith('ret'):
                 tokens.append(self._match_ret(line))
+            elif line.startswith('push'):
+                value = line.split(' ', 1)[1].rstrip(';')
+                tokens.append(Token('PUSH', value))
+            elif '= pop' in line:
+                match = re.match(r'\$(\w+):\s*(\w+)\s*=\s*pop;', line)
+                if match:
+                    tokens.append(Token('POP', (match.group(1), match.group(2))))
             elif line.startswith('$'):
                 # If the line starts with $<name>[..., it's an array element assignment.
                 if re.match(r'^\$\w+\[', line):
@@ -172,7 +179,17 @@ class Lexer:
             args = [a.split(':')[0].strip() for a in match.group(4).split(',')]
             return Token('FUNC_CALL_ASSIGN', (var_name, match.group(3), args))
         elif match.group(5):  # Struct initializer
-            fields = re.findall(r'\$(\w+):\s*(\$?\w+)', match.group(6))
+            fields_text = match.group(6)
+            fields = []
+            # Split by comma and process each field individually
+            for part in fields_text.split(','):
+                part = part.strip()
+                m_field = re.match(r'\$(\w+):\s*(?:"([^"]+)"|(\$?\w+))', part)
+                if m_field:
+                    name = m_field.group(1)
+                    # Preserve quotes for string literals so that codegen can recognize them
+                    value = f'"{m_field.group(2)}"' if m_field.group(2) is not None else m_field.group(3)
+                    fields.append((name, value))
             return Token('VAR_DECL', (var_name, var_type, fields))
         elif match.group(7):  # Enum value
             return Token('ENUM_VALUE', (var_name, var_type, f"{match.group(7)}::{match.group(8)}"))
@@ -378,6 +395,15 @@ class ArrayAssignNode(ASTNode):
         self.index = index
         self.value = value
 
+class PushNode(ASTNode):
+    def __init__(self, value):
+        self.value = value
+
+class PopNode(ASTNode):
+    def __init__(self, var_name, var_type):
+        self.var_name = var_name
+        self.var_type = var_type
+
 class Parser:
     def __init__(self, tokens):
         self.tokens = tokens
@@ -446,5 +472,9 @@ class Parser:
             elif token.type == 'ADDRESS_OF':
                 var_name, var_type, target = token.value
                 ast.append(AddressOfNode(var_name, var_type, target))
+            elif token.type == 'PUSH':
+                ast.append(PushNode(token.value))
+            elif token.type == 'POP':
+                ast.append(PopNode(*token.value))
             self.pos += 1
         return ast

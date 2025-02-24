@@ -1,0 +1,16 @@
+datadef fmt: bytes = "%d\n";
+datadef fmt2: bytes = "%s\n";
+
+extern %printf;
+
+funcdef %main() -> int {
+    # you can push only strings and ints
+    push 10;
+    $r: int = pop;
+    push "Hello, world!";
+    $s: bytes = pop;
+
+    call %printf(fmt: bytes, $r: int);
+    call %printf(fmt2: bytes, $s: bytes);
+    ret int 0;
+}

@@ -34,7 +34,7 @@
            ("\\<enumdef\\s-+\\([[:alnum:]_]+\\)" 1 'font-lock-type-face)
            ))
         (keywords '("datadef" "bssdef" "funcdef" "extern" "enumdef" "structdef"))
-        (builtins '("ret" "call" "jmp" "cmp" "jle" "add" "sub" "mul" "div" "shl" "shr" "get"))
+        (builtins '("ret" "call" "jmp" "cmp" "jle" "add" "sub" "mul" "div" "shl" "shr" "get" "push" "pop"))
         (types '("int" "bytes" "bytesbuff" "void")))
     (append def-patterns
             (list
