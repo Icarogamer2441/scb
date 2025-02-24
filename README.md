@@ -46,7 +46,7 @@ extern %printf;
 ### Variable Declarations
 
 ```scb
-$x: int = int 1;
+$x: int = 1;
 ```
 
 ### Arithmetic Operations
@@ -54,6 +54,11 @@ $x: int = int 1;
 ```scb
 $y: int = add $x, 2;
 ```
+
+- add
+- sub
+- mul
+- div
 
 ### Function Calls
 
