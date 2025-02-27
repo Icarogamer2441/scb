@@ -1,0 +1,16 @@
+datadef name: bytes = "test.txt";
+datadef content: bytes = "Hello, world!";
+
+use runtime;
+
+extern %printf;
+
+funcdef %main() -> int {
+    $mode: bytes = "w";
+    $file: ftype = call %open(name, $mode);
+    call %write($file, content);
+    call %close($file);
+    $msg: bytes = "File written successfully\n";
+    call %printf($msg);
+    ret int 0;
+}

@@ -1,0 +1,14 @@
+datadef fmt: bytes = "\"Hello world!\" starts with \"Hello\"?: %d. and ends with \"world!\"?: %d\n";
+
+use runtime;
+extern %printf;
+
+funcdef %main() -> int {
+    $str: bytes = "Hello world!";
+    $substr: bytes = "Hello";
+    $result: int = call %starts_with($str, $substr);
+    $substr2: bytes = "world!";
+    $result2: int = call %ends_with($str, $substr2);
+    call %printf(fmt, $result, $result2);
+    ret int 0;
+}

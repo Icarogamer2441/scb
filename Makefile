@@ -1,4 +1,4 @@
-all: ./examples/vars ./examples/hello ./examples/funcs ./examples/labels ./examples/char ./examples/structs ./examples/structs2 ./examples/enums ./examples/stringbuff ./examples/pointer ./examples/pointer2 ./examples/arrays ./examples/shifts ./examples/get_value ./examples/stack ./examples/struct_bytes
+all: ./examples/vars ./examples/hello ./examples/funcs ./examples/labels ./examples/char ./examples/structs ./examples/structs2 ./examples/enums ./examples/stringbuff ./examples/pointer ./examples/pointer2 ./examples/arrays ./examples/shifts ./examples/get_value ./examples/stack ./examples/struct_bytes ./examples/files ./examples/startsends
 
 ./examples/%: ./examples/%.scb
 	python3 scbc.py -c $<
@@ -23,6 +23,8 @@ clean:
 	      ./examples/get_value \
 	      ./examples/stack \
 	      ./examples/struct_bytes \
+	      ./examples/files \
+	      ./examples/startsends \
 	      ./examples/*.s
 
 runall:
@@ -58,6 +60,10 @@ runall:
 	./examples/stack
 	echo "Running struct_bytes\n"
 	./examples/struct_bytes
+	echo "Running files\n"
+	./examples/files
+	echo "Running startsends\n"
+	./examples/startsends
 
 build:
 	pyinstaller --onefile scbc.py

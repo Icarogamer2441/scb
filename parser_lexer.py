@@ -24,6 +24,12 @@ class Lexer:
             line = line.strip()
             if not line or line.startswith('//'):
                 continue
+
+            # Check for use runtime first
+            use_runtime = self._match_use_runtime(line)
+            if use_runtime:
+                tokens.append(use_runtime)
+                continue
                 
             if line.startswith('structdef'):
                 in_struct = True
@@ -286,6 +292,11 @@ class Lexer:
             return Token('ARRAY_ASSIGN', (var_name, index, value))
         raise SyntaxError(f"Invalid array assignment: {line}")
 
+    def _match_use_runtime(self, line):
+        if line.strip() == 'use runtime;':
+            return Token('USE_RUNTIME', None)
+        return None
+
 class ASTNode:
     pass
 
@@ -404,6 +415,10 @@ class PopNode(ASTNode):
         self.var_name = var_name
         self.var_type = var_type
 
+class UseRuntimeNode:
+    def __init__(self):
+        pass
+
 class Parser:
     def __init__(self, tokens):
         self.tokens = tokens
@@ -476,5 +491,7 @@ class Parser:
                 ast.append(PushNode(token.value))
             elif token.type == 'POP':
                 ast.append(PopNode(*token.value))
+            elif token.type == 'USE_RUNTIME':
+                ast.append(UseRuntimeNode())
             self.pos += 1
         return ast

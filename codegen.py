@@ -1,4 +1,4 @@
-from parser_lexer import DataDefNode, ExternNode, FuncDefNode, CallNode, RetNode, VarDeclNode, BinOpNode, FuncCallAssignNode, StrDeclNode, LabelNode, CmpNode, JumpNode, StructDefNode, EnumDefNode, BssDefNode, ArrayAccessNode, AddressOfNode, PointerDerefNode, ArrayAssignNode, PushNode, PopNode
+from parser_lexer import DataDefNode, ExternNode, FuncDefNode, CallNode, RetNode, VarDeclNode, BinOpNode, FuncCallAssignNode, StrDeclNode, LabelNode, CmpNode, JumpNode, StructDefNode, EnumDefNode, BssDefNode, ArrayAccessNode, AddressOfNode, PointerDerefNode, ArrayAssignNode, PushNode, PopNode, UseRuntimeNode
 import re
 
 class CodeGenerator:
@@ -14,6 +14,8 @@ class CodeGenerator:
         self.func_prologue_index_updated = False
         self.target_os = target_os  # 'linux' or 'win64'
         self.param_regs = ['rcx', 'rdx', 'r8', 'r9'] if target_os == 'win64' else ['rdi', 'rsi', 'rdx', 'rcx', 'r8', 'r9']
+        self.use_runtime = False
+        self.runtime_funcs = ['open', 'write', 'close', 'allocate', 'deallocate', 'starts_with', 'ends_with']
     
     def generate(self, ast):
         for node in ast:
@@ -59,6 +61,13 @@ class CodeGenerator:
                 self._gen_push(node)
             elif isinstance(node, PopNode):
                 self._gen_pop(node)
+            elif isinstance(node, UseRuntimeNode):
+                self.use_runtime = True
+                # Add externs for runtime functions
+                runtime_funcs = ['open', 'write', 'close', 'allocate', 'deallocate']
+                for func in runtime_funcs:
+                    self.externs.add(func)
+                    self.text_section.append(f'.extern {func}')
         return self._finalize_asm()
     
     def _gen_data_def(self, node):

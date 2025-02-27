@@ -16,3 +16,4 @@ dist/
 examples/*.s
 tests/
 examples/*.exe
+*.txt
