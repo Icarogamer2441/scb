@@ -2,7 +2,7 @@ from parser_lexer import DataDefNode, ExternNode, FuncDefNode, CallNode, RetNode
 import re
 
 class CodeGenerator:
-    def __init__(self):
+    def __init__(self, target_os='linux'):
         self.data_section = []
         self.text_section = []
         self.externs = set()
@@ -12,6 +12,8 @@ class CodeGenerator:
         self.enums = {}
         self.func_prologue_index = None
         self.func_prologue_index_updated = False
+        self.target_os = target_os  # 'linux' or 'win64'
+        self.param_regs = ['rcx', 'rdx', 'r8', 'r9'] if target_os == 'win64' else ['rdi', 'rsi', 'rdx', 'rcx', 'r8', 'r9']
     
     def generate(self, ast):
         for node in ast:
@@ -72,38 +74,44 @@ class CodeGenerator:
         self.text_section.append(f'.extern {node.name}')
     
     def _gen_func_def(self, node):
+        shadow_space = 32 if self.target_os == 'win64' else 0
+        
         self.text_section.extend([
             f'.text',
             f'.globl {node.name}',
-            f'.type {node.name}, @function',
+            f'.type {node.name}, @function' if self.target_os == 'linux' else '',
             f'{node.name}:',
             '    push rbp',
             '    mov rbp, rsp',
-            '    sub rsp, STACK_SIZE_PLACEHOLDER'  # Placeholder, optimized later
+            f'    sub rsp, STACK_SIZE_PLACEHOLDER + {shadow_space}'
         ])
+        
+        # Filter out empty strings from the assembly
+        self.text_section = [line for line in self.text_section if line.strip() != '']
+        
         # Record the index of our placeholder prologue line for later update.
         self.func_prologue_index = len(self.text_section) - 1
         # Reset stack offset for local variables
-        self.stack_offset = 0
+        self.stack_offset = shadow_space  # Start after shadow space on Windows
         self.vars = {}
         
         # Store parameters
-        regs = ['rdi', 'rsi', 'rdx', 'rcx', 'r8', 'r9']
         for i, param in enumerate(node.params):
             offset = self.stack_offset + 16
             self.vars[param] = (offset, param)
-            self.text_section.append(f'    mov [rbp - {offset}], {regs[i]}')
+            if i < len(self.param_regs):
+                self.text_section.append(f'    mov [rbp - {offset}], {self.param_regs[i]}')
             self.stack_offset += 8
         
-        # Special handling for main's argv
-        if node.name == 'main':
+        # Windows main function handling
+        if node.name == 'main' and self.target_os == 'win64':
             self.text_section.extend([
-                f'    mov [rbp - 8], rdi',   # Store argc
-                f'    mov [rbp - 16], rsi'   # Store argv
+                f'    mov [rbp - {self.stack_offset + 8}], rcx',   # Store argc
+                f'    mov [rbp - {self.stack_offset + 16}], rdx'   # Store argv
             ])
-            self.vars['argc'] = (8, 'int')
-            self.vars['argv'] = (16, 'bytes**')
-            self.stack_offset = 16
+            self.vars['argc'] = (self.stack_offset + 8, 'int')
+            self.vars['argv'] = (self.stack_offset + 16, 'bytes**')
+            self.stack_offset += 16
     
     def _gen_var_decl(self, node):
         if isinstance(node, AddressOfNode):
@@ -268,20 +276,18 @@ class CodeGenerator:
     def _gen_call(self, node):
         processed_args = []
         for arg in node.args:
-            # NEW: Handle pointer dereference nodes (using '<>')
             if isinstance(arg, PointerDerefNode):
                 clean_var_name = arg.var_name.lstrip('$')
                 offset, _ = self.vars[clean_var_name]
-                # Load pointer value from its stack location
+                # Load pointer value from stack
                 self.text_section.append(f'    mov rax, QWORD PTR [rbp - {offset}]')
-                pointer_offset = arg.index * 8  # scale offset by element size (assumed 8 bytes)
+                pointer_offset = arg.index * 8
                 if pointer_offset != 0:
                     self.text_section.append(f'    add rax, {pointer_offset}')
-                # Now dereference the pointer
+                # Always dereference pointers when using <> syntax
                 self.text_section.append(f'    mov rax, QWORD PTR [rax]')
                 processed_args.append('rax')
                 continue
-            
             # Existing case for simple variable usage
             if isinstance(arg, str) and arg.startswith('$'):
                 var_name = arg[1:]  # Remove $
@@ -321,10 +327,16 @@ class CodeGenerator:
             else:
                 processed_args.append(arg)
         
-        regs = ['rdi', 'rsi', 'rdx', 'rcx', 'r8', 'r9']
+        # Windows requires 32 bytes of shadow space
+        if self.target_os == 'win64':
+            self.text_section.append('    sub rsp, 32')  # Allocate shadow space
+
+        regs = self.param_regs
         for i, arg in enumerate(processed_args):
             if i >= len(regs):
-                break
+                # On Windows, push remaining args to stack in reverse order
+                self.text_section.insert(-1, f'    push {arg}')
+                continue
             if arg in ['rax', 'rbx', 'rcx', 'rdx', 'rdi', 'rsi', 'r8', 'r9']:
                 self.text_section.append(f'    mov {regs[i]}, {arg}')
             elif arg.startswith('['):
@@ -339,6 +351,9 @@ class CodeGenerator:
                 self.text_section.append(f'    lea {regs[i]}, [{arg} + rip]')
         self.text_section.append('    xor rax, rax')
         self.text_section.append(f'    call {node.func}')
+        
+        if self.target_os == 'win64':
+            self.text_section.append('    add rsp, 32')  # Cleanup shadow space
     
     def _gen_ret(self, node):
         # If this is the first RET in the current function, patch the placeholder
@@ -351,9 +366,10 @@ class CodeGenerator:
         if node.ret_type != 'void':
             if node.value.startswith('$'):
                 offset, _ = self.vars[node.value[1:]]
-                self.text_section.append(f'    mov eax, DWORD PTR [rbp - {offset}]')
+                # Use QWORD PTR and RAX for 64-bit values
+                self.text_section.append(f'    mov rax, QWORD PTR [rbp - {offset}]')
             else:
-                self.text_section.append(f'    mov eax, {node.value}')
+                self.text_section.append(f'    mov rax, {node.value}')
 
         self.text_section.extend([
             '    mov rsp, rbp',
@@ -368,16 +384,30 @@ class CodeGenerator:
             self.vars[node.var_name] = (offset, 'int')
             self.stack_offset += 8
         
-        # Generate the function call
-        regs = ['rdi', 'rsi', 'rdx', 'rcx', 'r8', 'r9']
+        # Use the correct platform-specific registers for arguments
+        regs = self.param_regs  # Use the platform-specific registers defined in __init__
+        
+        # Windows requires 32 bytes of shadow space
+        if self.target_os == 'win64':
+            self.text_section.append('    sub rsp, 32')  # Allocate shadow space
+        
         for i, arg in enumerate(node.args):
+            if i >= len(regs):
+                # Handle stack arguments if needed
+                continue
+            
             if arg.startswith('$'):
                 offset, _ = self.vars[arg[1:]]
                 self.text_section.append(f'    mov {regs[i]}, QWORD PTR [rbp - {offset}]')
             else:
                 self.text_section.append(f'    lea {regs[i]}, [{arg} + rip]')
         
+        self.text_section.append('    xor rax, rax')  # Zero out RAX for variadic functions
         self.text_section.append(f'    call {node.func_name}')
+        
+        # Clean up shadow space if on Windows
+        if self.target_os == 'win64':
+            self.text_section.append('    add rsp, 32')
         
         # Store result
         offset, _ = self.vars[node.var_name]
@@ -503,23 +533,29 @@ class CodeGenerator:
     def _finalize_asm(self):
         assembly = [
             '.intel_syntax noprefix',
-            '.section .note.GNU-stack,"",@progbits',
-            '.section .note.gnu.property,"a"',
-            '    .align 8',
-            '    .long 1f - 0f',
-            '    .long 4f - 1f',
-            '    .long 5',
-            '0: .asciz "GNU"',
-            '1: .align 8',
-            '    .long 0xc0000002',
-            '    .long 3f - 2f',
-            '2: .long 0x3',
-            '3: .align 8',
-            '4:'
         ]
+        
+        # Add platform-specific sections
+        if self.target_os == 'linux':
+            assembly.extend([
+                '.section .note.GNU-stack,"",@progbits',
+                '.section .note.gnu.property,"a"',
+                '    .align 8',
+                '    .long 1f - 0f',
+                '    .long 4f - 1f',
+                '    .long 5',
+                '0: .asciz "GNU"',
+                '1: .align 8',
+                '    .long 0xc0000002',
+                '    .long 3f - 2f',
+                '2: .long 0x3',
+                '3: .align 8',
+                '4:'
+            ])
+        
         assembly.extend(self.data_section)
         assembly.append('')
         assembly.append('.text')
         assembly.extend(self.text_section)
-        assembly.append('')  # Add final newline
+        assembly.append('')
         return '\n'.join(assembly)
