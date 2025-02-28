@@ -45,6 +45,27 @@ int ends_with(const char* str, const char* suffix) {
     if (len_suffix > len_str) return 0;
     return strncmp(str + len_str - len_suffix, suffix, len_suffix) == 0;
 }
+
+char* read(void* file) {
+    FILE* fp = (FILE*)file;
+    char* content = NULL;
+    size_t len = 0;
+    char buffer[1024];
+    
+    while (fgets(buffer, sizeof(buffer), fp)) {
+        size_t new_len = len + strlen(buffer);
+        char* new_content = realloc(content, new_len + 1);
+        if (!new_content) {
+            free(content);
+            return NULL;
+        }
+        content = new_content;
+        strcpy(content + len, buffer);
+        len = new_len;
+    }
+    
+    return content;
+}
 """
 
 class SCBCompiler:

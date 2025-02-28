@@ -15,7 +15,7 @@ class CodeGenerator:
         self.target_os = target_os  # 'linux' or 'win64'
         self.param_regs = ['rcx', 'rdx', 'r8', 'r9'] if target_os == 'win64' else ['rdi', 'rsi', 'rdx', 'rcx', 'r8', 'r9']
         self.use_runtime = False
-        self.runtime_funcs = ['open', 'write', 'close', 'allocate', 'deallocate', 'starts_with', 'ends_with']
+        self.runtime_funcs = ['open', 'write', 'close', 'read', 'allocate', 'deallocate', 'starts_with', 'ends_with']
     
     def generate(self, ast):
         for node in ast:
@@ -63,9 +63,8 @@ class CodeGenerator:
                 self._gen_pop(node)
             elif isinstance(node, UseRuntimeNode):
                 self.use_runtime = True
-                # Add externs for runtime functions
-                runtime_funcs = ['open', 'write', 'close', 'allocate', 'deallocate']
-                for func in runtime_funcs:
+                # Add externs for all runtime functions
+                for func in self.runtime_funcs:
                     self.externs.add(func)
                     self.text_section.append(f'.extern {func}')
         return self._finalize_asm()

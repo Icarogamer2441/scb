@@ -1,0 +1,16 @@
+datadef fmt: bytes = "Hello, world!\n";
+
+use runtime;
+
+extern %printf;
+
+funcdef %main() -> int {
+    $filename: bytes = "test.txt";
+    $mode: bytes = "r";
+    $file: ftype = call %open($filename: bytes, $mode: bytes);
+    $content: bytes = call %read($file: ftype);
+    call %close($file: ftype);
+    $msg: bytes = "File content: %s\n";
+    call %printf($msg: bytes, $content: bytes);
+    ret int 0;
+}

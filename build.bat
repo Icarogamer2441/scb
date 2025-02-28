@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 
 set EXAMPLES_DIR=examples
-set EXAMPLES= vars hello funcs labels char structs structs2 enums stringbuff pointer pointer2 arrays shifts get_value stack struct_bytes files startsends
+set EXAMPLES= vars hello funcs labels char structs structs2 enums stringbuff pointer pointer2 arrays shifts get_value stack struct_bytes files startsends files2
 
 if "%1" == "all" (
     for %%e in (%EXAMPLES%) do (

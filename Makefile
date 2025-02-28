@@ -1,4 +1,4 @@
-all: ./examples/vars ./examples/hello ./examples/funcs ./examples/labels ./examples/char ./examples/structs ./examples/structs2 ./examples/enums ./examples/stringbuff ./examples/pointer ./examples/pointer2 ./examples/arrays ./examples/shifts ./examples/get_value ./examples/stack ./examples/struct_bytes ./examples/files ./examples/startsends
+all: ./examples/vars ./examples/hello ./examples/funcs ./examples/labels ./examples/char ./examples/structs ./examples/structs2 ./examples/enums ./examples/stringbuff ./examples/pointer ./examples/pointer2 ./examples/arrays ./examples/shifts ./examples/get_value ./examples/stack ./examples/struct_bytes ./examples/files ./examples/startsends ./examples/files2
 
 ./examples/%: ./examples/%.scb
 	python3 scbc.py -c $<
@@ -25,6 +25,7 @@ clean:
 	      ./examples/struct_bytes \
 	      ./examples/files \
 	      ./examples/startsends \
+	      ./examples/files2 \
 	      ./examples/*.s
 
 runall:
@@ -64,6 +65,8 @@ runall:
 	./examples/files
 	echo "Running startsends\n"
 	./examples/startsends
+	echo "Running files2\n"
+	./examples/files2
 
 build:
 	pyinstaller --onefile scbc.py

@@ -7,10 +7,10 @@ extern %printf;
 
 funcdef %main() -> int {
     $mode: bytes = "w";
-    $file: ftype = call %open(name, $mode);
-    call %write($file, content);
-    call %close($file);
+    $file: ftype = call %open(name: bytes, $mode: bytes);
+    call %write($file: ftype, content: bytes);
+    call %close($file: ftype);
     $msg: bytes = "File written successfully\n";
-    call %printf($msg);
+    call %printf($msg: bytes);
     ret int 0;
 }
