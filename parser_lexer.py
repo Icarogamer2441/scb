@@ -111,8 +111,8 @@ class Lexer:
     def _match_funcdef(self, line):
         match = re.match(r'funcdef\s+%(\w+)\((.*)\)\s*->\s*\w+\s*{', line)
         if match:
-            # Strip $ from parameter names
-            params = [p.split(':')[0].strip().lstrip('$') for p in match.group(2).split(',')]
+            # Strip $ and * from parameter names
+            params = [p.split(':')[0].strip().lstrip('$').lstrip('*') for p in match.group(2).split(',')]
             return Token('FUNCDEF', (match.group(1), params))
         raise SyntaxError(f"Invalid funcdef: {line}")
     
