@@ -366,7 +366,15 @@ class CodeGenerator:
     def _gen_ret(self, node):
         # If this is the first RET in the current function, patch the placeholder
         if self.func_prologue_index is not None:
-            final_offset = ((self.stack_offset + 63) // 64) * 64
+            # Calculate minimum stack size for red zone (Linux) or shadow space (Windows)
+            if self.target_os == 'linux':
+                min_stack = 128  # Red zone size for System V ABI
+            else:
+                min_stack = 0
+            
+            final_offset = ((self.stack_offset + min_stack + 63) // 64) * 64
+            final_offset = max(final_offset, min_stack)
+            
             self.text_section[self.func_prologue_index] = f'    sub rsp, {final_offset}'
             # Clear the index so that subsequent RET nodes do not re-patch
             self.func_prologue_index = None
@@ -524,13 +532,68 @@ class CodeGenerator:
                 f'    lea rax, [{label} + rip]',
                 '    push rax'
             ])
+        elif node.value.startswith('$'):
+            # Handle pushing variable values
+            var_name = node.value[1:]
+            if var_name not in self.vars:
+                raise ValueError(f"Variable {var_name} not declared for push operation")
+            offset, _ = self.vars[var_name]
+            self.text_section.extend([
+                f'    mov rax, QWORD PTR [rbp - {offset}]',
+                '    push rax'
+            ])
+        elif any(node.value.startswith(op) for op in ['add ', 'sub ', 'mul ', 'div ', 'shl ', 'shr ']):
+            # Novo tratamento para operações aritméticas
+            op, rest = node.value.split(' ', 1)
+            left, right = rest.split(',', 1)
+            left = left.strip()
+            right = right.strip()
+
+            # Carrega operando esquerdo
+            if left.startswith('$'):
+                l_var = left[1:]
+                l_offset, _ = self.vars[l_var]
+                self.text_section.append(f'    mov rax, QWORD PTR [rbp - {l_offset}]')
+            else:
+                self.text_section.append(f'    mov rax, {left}')
+
+            # Carrega operando direito
+            if right.startswith('$'):
+                r_var = right[1:]
+                r_offset, _ = self.vars[r_var]
+                self.text_section.append(f'    mov rbx, QWORD PTR [rbp - {r_offset}]')
+            else:
+                self.text_section.append(f'    mov rbx, {right}')
+
+            # Gera instrução da operação
+            if op == 'add':
+                self.text_section.append('    add rax, rbx')
+            elif op == 'sub':
+                self.text_section.append('    sub rax, rbx')
+            elif op == 'mul':
+                self.text_section.append('    imul rax, rbx')
+            elif op == 'div':
+                self.text_section.extend([
+                    '    cqo',
+                    '    idiv rbx'
+                ])
+            elif op == 'shl':
+                self.text_section.append('    shl rax, cl')
+            elif op == 'shr':
+                self.text_section.append('    shr rax, cl')
+
+            self.text_section.append('    push rax')
         else:
-            # Handle integers
+            # Assume valor inteiro literal
             self.text_section.append(f'    push {node.value}')
+        
+        self.stack_offset += 8
     
     def _gen_pop(self, node):
         offset = self.stack_offset + 16
         self.vars[node.var_name] = (offset, node.var_type)
+        
+        # Aloca espaço para a variável sem ajustar o offset posteriormente
         self.stack_offset += 8
         
         if node.var_type == 'bytes':

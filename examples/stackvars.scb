@@ -1,0 +1,17 @@
+datadef fmt: bytes = "%s %d\n";
+
+extern %printf;
+
+funcdef %main() -> int {
+    push 10;
+    push 20;
+    $b: int = pop;
+    $a: int = pop;
+    push add $a, $b;
+    $r: int = pop;
+    $msg: bytes = "sum:";
+    push $msg;
+    $msg2: bytes = pop;
+    call %printf(fmt, $msg2, $r);
+    ret int 0;
+}
